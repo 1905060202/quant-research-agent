@@ -76,8 +76,12 @@ def _extract_tool_calls(text: str) -> list:
                 continue
     return calls
 
-def _chat_with_retry(system: str, prompt: str, max_tokens: int = 600, retries: int = 2):
-    """LLM 调用 + 空响应重试（T05 稳定性修复：DeepSeek 偶发返回空）"""
+def _chat_with_retry(system: str, prompt: str, max_tokens: int = 1000, retries: int = 2):
+    """LLM 调用 + 空响应重试（T05 稳定性修复：DeepSeek 偶发返回空）
+
+    max_tokens 默认 1000（W2 缺陷修复：600 会截断工具调用 JSON，
+    被截断的 {"tool": ... 解析失败后被误当最终回答返回）
+    """
     for attempt in range(retries + 1):
         resp = chat(system, prompt, max_tokens=max_tokens)
         if resp and resp.strip():
@@ -106,7 +110,7 @@ def agent_node(state, max_rounds: int = 3):
         prompt = f"对话历史：\n{history}\n\n当前用户问题：{current_q}"
         if tool_log:
             prompt += f"\n\n已完成的工具调用结果（如果还有没查的标的，继续调用工具；查完了就汇总回答）：\n{'\n'.join(tool_log)}"
-        resp = _chat_with_retry(SYSTEM, prompt, max_tokens=600)
+        resp = _chat_with_retry(SYSTEM, prompt)
         last_resp = resp
         calls = _extract_tool_calls(resp)   # 支持一次多个工具调用
         if calls:
@@ -114,6 +118,10 @@ def agent_node(state, max_rounds: int = 3):
                 result = call_tool(tool_name, args)
                 tool_log.append(f"[{tool_name} {json.dumps(args, ensure_ascii=False)}] → {result}")
             current_q = user_q
+            continue
+        # 看起来像想调工具但 JSON 被截断 → 让它补全，而不是把残片当答案
+        if resp.strip().startswith("{") and resp.strip()[-1:] != "}":
+            current_q = "你上次输出被截断了，请重新输出完整的工具调用 JSON（或直接回答）。"
             continue
         # 无工具调用 → 这就是最终回答
         if resp.strip():
@@ -125,7 +133,7 @@ def agent_node(state, max_rounds: int = 3):
     if tool_log:
         final_prompt = (f"对话历史：\n{history}\n\n原始问题：{user_q}\n\n"
                         f"工具结果汇总（请基于这些结果直接回答用户，不要输出JSON）：\n{'\n'.join(tool_log)}")
-        final_resp = _chat_with_retry(SYSTEM, final_prompt, max_tokens=600)
+        final_resp = _chat_with_retry(SYSTEM, final_prompt)
         if final_resp.strip():
             return {"final_answer": final_resp.strip(), "tool_log": tool_log}
     # 最后兜底

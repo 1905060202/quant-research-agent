@@ -42,3 +42,4 @@ data/
 .hermes/qra_verify.db
 .hermes/qra_verify.db-*
 .hermes/verification_evidence.db
+bench/isolation/

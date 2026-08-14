@@ -60,6 +60,22 @@
 - D4 精炼回路 plan/record（harness.plan_refinement 移植）
 - D1 方法论 skills/ 化（skills.js 发现协议）→ P1 待做
 
+## W2 补 · Chroma 向量检索（2026-08-14）
+
+| 用例 | 结果 | 说明 |
+|---|---|---|
+| 查行情 | ✅ | LLM 调 market_query，1.164 +0.78%（数据时间 15:45） |
+| 多假设竞争怎么做 | ✅ | kb_search 命中 v2.1，Phase 4.5/前检表/判断日志进回答 |
+| 日报自动化起步 | ✅ | LLM 自主检索 KB，引用 3 篇文档给落地路线 |
+
+**升级内容**：bigram 字面检索 → **Chroma 向量检索**（687 块 / 7799 维 n-gram TF 向量 / 余弦相似度 TopK）。embedding 用零下载离线方案（hf-mirror 64KB/s 不可行），机制与真实向量检索一致，语义弱于 transformer——生产换 bge 类模型（注入点已留）。
+
+**探针**：『多假设竞争』→ 精准命中 v2.1（距离 0.400）；『叙事维度的因子溢价』→ narrative_awareness 两段召回。
+
+**调试记录（本轮 2 个真实 bug）**：
+1. max_tokens=600 截断工具调用 JSON → `{"tool": "kb_search", "` 残片被误当最终回答 → 提到 1000 + 截断残片请求续写
+2. DeepSeek 偶发空响应 → 重试逻辑已在，本轮再次触发验证有效（3 次重试后成功）
+
 ## 源码精读记录（三源码交叉）
 - prime-agent（skills.js/frontmatter.js/harness.py）→ D1-D8
 - Hermes（hermes_state.py 8767行/memory_manager.py 1241行）→ D9/D10/D16/D17
