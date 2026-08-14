@@ -1,0 +1,4 @@
+name: qra_refine
+version: 0.1.0
+description: "QRA 评审门移植：prime refinement 的准入质量门（拒绝一次性噪音/瞬时输出/无据假设）→ hermes background_review。嫁接点=官方兼容钩（agent._XX_REVIEW_PROMPT getattr 回退到模块常量），register() 时重写三个模块常量，vendor 源码零改动。"
+kind: standalone

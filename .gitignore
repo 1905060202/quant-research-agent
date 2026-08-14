@@ -20,7 +20,8 @@ data/
 .hermes/cache/
 .hermes/cron/
 .hermes/hooks/
-.hermes/skills/
+.hermes/skills/*
+!.hermes/skills/qra_daily/
 .hermes/audio_cache/
 .hermes/image_cache/
 .hermes/pairing/
@@ -31,6 +32,9 @@ data/
 .hermes/.hermes_history
 .hermes/.skills_prompt_snapshot.json
 .hermes/*.log
+.hermes/.update_check
+.hermes/bin/
+.hermes/provider_models_cache.json
 
 # W3 记忆/验证账本运行时库（证据见 W3 文档与 transcripts）
 .hermes/qra_memory.db

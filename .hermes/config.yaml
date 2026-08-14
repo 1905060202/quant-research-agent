@@ -3,11 +3,12 @@ model:
   default: "deepseek/deepseek-v4-pro"
   provider: "anthropic"
 
-# QRA 插件（.hermes/plugins/qra/ + qra_verify/）
+# QRA 插件（.hermes/plugins/qra/ + qra_verify/ + qra_refine/）
 plugins:
   enabled:
     - qra
     - qra_verify
+    - qra_refine
 
 # 记忆：qra_memory provider（Mem0 增量协议 + 契约只读 + Dream 整合）
 # 内置 MEMORY.md 仍可用作会话草稿；qra_memory 是持久层
