@@ -2,9 +2,15 @@
 # QRA 命令入口：本质是 Hermes 引擎 + QRA 定制层（融合架构，D002）
 #
 # 用法：
-#   qra -z "查一下贵州茅台现价"     # 单发问答（只回显最终答复）
-#   qra                             # 交互模式
+#   qra console -z "问题"          # prime 式 CoT 全展示终端（推荐）
+#   qra console                    # 多轮交互（Ctrl+T 折叠思考）
+#   qra -z "查一下贵州茅台现价"     # 传统单发问答（只回显最终答复）
 #
 # 安装到 PATH（一次性）：
 #   ln -s "$(pwd)/bin/qra" /usr/local/bin/qra
-exec "$(cd "$(dirname "$0")/.." && pwd)/scripts/run_qra.sh" "$@"
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+if [[ "${1:-}" == "console" ]]; then
+    shift
+    exec "$ROOT/scripts/qra_console.sh" "$@"
+fi
+exec "$ROOT/scripts/run_qra.sh" "$@"

@@ -35,6 +35,8 @@ data/
 .hermes/.update_check
 .hermes/bin/
 .hermes/provider_models_cache.json
+.hermes/models_dev_cache.json
+.hermes/models_dev_cache.etag
 
 # W3 记忆/验证账本运行时库（证据见 W3 文档与 transcripts）
 .hermes/qra_memory.db
