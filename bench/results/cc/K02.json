@@ -1,0 +1,9 @@
+{
+  "id": "K02",
+  "prompt": "猎豹 v4 GBR 基线模型的 Daily Mean IC 是多少？它揭示了 A 股预测力的什么关键发现？",
+  "answer": "查到了，来源是 `kb_sources/cheetah/CHEETAH_V1_EVOLUTION.md:16-21`：\n\n## 猎豹 v4 GBR 基线\n\n- **Daily Mean IC = 0.034 ± 0.020**，Blind IC = 0.041（44 特征纯 GBR，严格 walk-forward）\n- IC decay 从 t+2 起转负 —— 短周期预测力弱\n\n## 揭示的关键发现\n\n**A 股预测力集中在板块共模中，个股残差收益杀信号。** 也就是说，能被 GBR 抓到的那点预测力主要来自板块/行业层面的同步波动；把行业共模剥离后（行业中性化、或用\"个股收益 - 行业均值\"做残差收益标签），信号几乎消失。\n\n后续迭代实验进一步印证了这一点（`FACTOR_ITERATION_20260525.md:47-50, 228-229`）：\n\n- 行业中性化三次验证：IC 从 0.235 → 0.042；纯残差收益标签 IC 甚至转负（-0.080）\n- 8 个 OHLCV 新因子与现有 172 因子的 Spearman 相关高达 0.75–0.99，同一数据源增量信号为零\n\n文档里 Opus 的重新解读是（`FACTOR_ITERATION_20260525.md:234`）：行业中性化杀信号不代表要放弃行业维度，正确做法是用市场状态条件化替代，让模型自适应学习行业效应权重，而不是简单地把共模从标签里减掉。",
+  "latency_s": 22.6,
+  "exit_code": 0,
+  "quote_baseline": {},
+  "stderr_tail": "\"deepseek-v4-pro\" is not a model this version of Claude Code recognizes, so auto-compact will keep this session within 200k tokens (the context window it assumes). If the model accepts more, append [1m] to the model name for 1M, or set CLAUDE_CODE_MAX_CONTEXT_TOKENS to its real window; to make it recognized, map it in the modelOverrides setting or update Claude Code; CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT=1 restores the previous wait-for-the-API behavior.\n"
+}

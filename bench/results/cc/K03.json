@@ -1,0 +1,9 @@
+{
+  "id": "K03",
+  "prompt": "猎豹 v5 daily 日频模型为什么被判定 IC 虚高？这件事留下的铁律教训是什么？",
+  "answer": "这个问题正是 QRA-Bench 的 K03 题。答案都在 KB 里（`kb_sources/cheetah/`），综合三份文档回答如下：\n\n## 为什么被判 IC 虚高\n\n**猎豹 v5 daily（日频，HistGradientBoosting）报出 IC=0.81**，数字好到反常，最终被证实为数据泄露。两层根因：\n\n1. **dropna 破坏日期分布 → 数据泄露**（`CHEETAH_V1_EVOLUTION.md:29-32`）\n   特征缺失行被直接丢弃，导致 train/test 的时间边界被模糊、日期分布发生偏移——模型实际看到了不该看到的未来信息。\n\n2. **NaN→0 填充 + 覆盖率仅 41% → rank 人为抬高**（`ITERATION_HISTORY.md:16-18`）\n   大部分特征值被填成 0，Spearman 排名相关性被填充值人为放大。\n\n**判定指纹**：IC decay 逆增长（5d=0.03 → 20d=0.07），正常模型 decay 应单调递减——\"高IC+逆decay=数据泄露指纹\"。\n\n**证伪实验**：覆盖率修复后 IC 从 0.81 直接归零到 0.08——41% 覆盖率的 0.81 是假的，100% 覆盖率的 0.08 才是真的。模型废弃，代码删除。同一陷阱后来在 v6 周频扩展又重演一次（34.6% 覆盖率 → IC 0.74 虚高，修复到 96.2% → 真 IC 0.08）。\n\n## 留下的铁律\n\n核心一条，在 `CHEETAH_V1_EVOLUTION.md:27` 和 `ITERATION_HISTORY.md:156` 被固化为铁律：\n\n> **覆盖率 < 80% 时，IC 虚高是铁律——IC 虚高可达 10 倍。**\n\n配套的纪律（`ITERATION_HISTORY.md` 关键教训总汇）：\n\n- **NaN→0 填充虚高 IC——永远先查 NaN 比例**\n- **dropna 破坏日期分布——用 nan_to_num，不 dropna**\n- **高 IC + 逆 decay = 数据泄露指纹**\n- **IC 太高先怀疑泄露，不要先高兴**（`CHEETAH_V1_EVOLUTION.md:14`）\n\n后续 v8 用\"修复所有已知 bug 后的诚实 IC\"（0.06，全市场）证明：之前所有 >0.10 的 IC 都有不同程度的虚高。这个教训也直接写进了 v9/猎豹 v1.0 的验收标准——分层 IC 报告（大/中/小盘）和覆盖率检查是进生产的强制门禁。",
+  "latency_s": 54.2,
+  "exit_code": 0,
+  "quote_baseline": {},
+  "stderr_tail": "\"deepseek-v4-pro\" is not a model this version of Claude Code recognizes, so auto-compact will keep this session within 200k tokens (the context window it assumes). If the model accepts more, append [1m] to the model name for 1M, or set CLAUDE_CODE_MAX_CONTEXT_TOKENS to its real window; to make it recognized, map it in the modelOverrides setting or update Claude Code; CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT=1 restores the previous wait-for-the-API behavior.\n"
+}

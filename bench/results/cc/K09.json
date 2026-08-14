@@ -1,0 +1,9 @@
+{
+  "id": "K09",
+  "prompt": "research_methodology_v4.md 的五层信息源架构中，第一层是什么？为什么它优先级最高？第五层是什么？",
+  "answer": "**第一层：官方一手源（🟢级·最高优先级）**\n\n即 Rockstar 直接发布的物料：Trailer（82 帧逐帧穷举）、133 张截图、预购页面逐词分析、9 份角色档案、6 个区域官方描述、专利全文（US11684855B2 等 7+ 项）、SEC 文件/财报、Business Wire 新闻稿。\n\n**为什么优先级最高**（`kb_sources/methodology/research_methodology_v4.md:151`）：\n\n> 官方物料不是\"宣传材料\"——它们是**加密的产品文档**。Trailer 的每一帧、截图的每一次发布、预购页面的每一句话——都经过了数十人数月的选择。\n\n也就是说，官方源的信息密度来自\"选择\"本身：展示什么、不展示什么、用什么词（\"border\" vs \"coast\" vs \"edge\"），都是设计意图的编码。所以采集方式必须是**穷举而非挑选**——不看一遍就完，而是 100% 覆盖、逐词/逐字/逐帧分析。\n\n**第五层：学术/分析文献（🟡🔵级·深度理解的文化框架）**\n\n- 法学文献（Robbins 2021）→ Florida Man 的法律根源\n- 人类学（Moran/Stanford）→ 气候种族主义、狂欢化理论\n- 文化研究（Bakhtin 1965）→ 怪诞身体、狂欢节\n- 游戏研究（Wright/Cardiff）→ Rockstar 的真实性建构\n- 产业分析（DFC/Piper Sandler/BofA）→ 销量预测、收入估算\n\n它的定位不是事实来源，而是**解释框架**——把前面四层采集的事实放进理论语境里（如用狂欢化理论把 Florida Man 从迷因解读为\"美国社会规则悬置的永久狂欢\"），所以标记是 🟡🔵 级而非 🟢 级。\n\n中间三层分别是：第二层全球分析师分布式网络（🟡级）、第三层泄露/非官方数据（🟡级·交叉验证后使用）、第四层对比基准数据（🟢🟡级·建立尺度感）。",
+  "latency_s": 25.4,
+  "exit_code": 0,
+  "quote_baseline": {},
+  "stderr_tail": "\"deepseek-v4-pro\" is not a model this version of Claude Code recognizes, so auto-compact will keep this session within 200k tokens (the context window it assumes). If the model accepts more, append [1m] to the model name for 1M, or set CLAUDE_CODE_MAX_CONTEXT_TOKENS to its real window; to make it recognized, map it in the modelOverrides setting or update Claude Code; CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT=1 restores the previous wait-for-the-API behavior.\n"
+}

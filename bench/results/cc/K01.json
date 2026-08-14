@@ -1,0 +1,9 @@
+{
+  "id": "K01",
+  "prompt": "猎豹 v5 周频截面排名模型为什么被废弃？列出主要原因。",
+  "answer": "**猎豹 v5 周频截面排名模型被废弃的三个直接原因**（`kb_sources/cheetah/CHEETAH_V1_EVOLUTION.md:23-27`，与 `ITERATION_HISTORY.md` v2 条目一致）：\n\n1. **LassoCV 前向泄露，IC=0.23 虚高**\n   - `features_v5.py` 用 `tail(100000)` 全量数据选特征，包含未来数据 → 训练期\"好\"IC 部分是泄露产物（v8 审计时才确认）。Walk-forward CV IC=0.2343、Blind IC=0.2075 均不可信。\n\n2. **行业映射覆盖率仅 38%**\n   - 远低于 80% 的铁律门槛。覆盖率不足时截面排名 IC 会系统性虚高——这是项目中反复验证的教训（\"覆盖率<80%时IC虚高是铁律\"）。\n\n3. **板块信号压缩无区分度**\n   - 只有 11 大类板块（akshare 申万 L1），粒度太粗，压缩后的板块信号无法支撑细分投资决策（后被 34 子板块替代）。\n\n**48 小时审计（`V5_POSTMORTEM_20260526.md`）揭示的更根本原因**——即为什么\"修好了也救不回来\"：\n\n- **真实 walk-forward IC 只有 0.056**，年化超额能力约 3-8%，远非声称的 15-25%。三个 IC 数字（in-sample 0.256 / 盲测 0.207 / walk-forward 0.056）差一个数量级。\n- **152 天数据 × 170 个 OHLCV 特征的结构性天花板**：特征数 > 独立样本数/10（152 天 20d horizon ≈ 7 个独立切片，上限约 70 特征），必然过拟合。\n- **同源特征信号已饱和**：新增 OHLCV 派生特征共线性 >0.75，是\"旧信息换包装\"；融资融券等新数据源覆盖率 20.3% 无法被模型利用。\n- **Regime 半衰期 9 天 < 20d horizon**：等 label 兑现时 regime 已换过 1-2 次，模型在预测不存在的东西。\n\n结论：在免费数据源约束下继续堆因子是沉没成本陷阱，所以废弃迭代、v5 降级为轻仓（≤¥50k）观察仓，等数据积累到 3 年/750 天+ 才重启。",
+  "latency_s": 67.1,
+  "exit_code": 0,
+  "quote_baseline": {},
+  "stderr_tail": "\"deepseek-v4-pro\" is not a model this version of Claude Code recognizes, so auto-compact will keep this session within 200k tokens (the context window it assumes). If the model accepts more, append [1m] to the model name for 1M, or set CLAUDE_CODE_MAX_CONTEXT_TOKENS to its real window; to make it recognized, map it in the modelOverrides setting or update Claude Code; CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT=1 restores the previous wait-for-the-API behavior.\n"
+}

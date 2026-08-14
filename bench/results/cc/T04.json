@@ -1,0 +1,25 @@
+{
+  "id": "T04",
+  "prompt": "用 qra_quote 分别查询 600176(中国巨石)、601899(紫金矿业)、002414(高德红外) 的现价和涨跌幅，并列表列出。",
+  "answer": "三只股票行情查询成功（数据时间 2026-08-14，已收盘）：\n\n| 代码 | 名称 | 现价（元） | 涨跌（元） | 涨跌幅 | 今开 | 最高 | 最低 | 成交量（股） | 成交额（亿元） |\n|------|------|-----------|-----------|--------|------|------|------|--------------|----------------|\n| 600176 | 中国巨石 | 44.39 | +2.49 | **+5.94%** | 42.40 | 44.62 | 41.90 | 2.78 亿 | 121.73 |\n| 601899 | 紫金矿业 | 32.53 | +0.32 | **+0.99%** | 31.80 | 32.66 | 31.75 | 1.94 亿 | 62.77 |\n| 002414 | 高德红外 | 13.92 | +0.09 | **+0.65%** | 13.90 | 13.99 | 13.74 | 0.49 亿 | 6.83 |\n\n三只股票今日全部收涨，其中**中国巨石涨幅最大（+5.94%）**，放量明显（成交额超 120 亿元，换手活跃）；紫金矿业和高德红外小幅上涨。\n\n数据来源：新浪 hq.sinajs.cn 实时行情（qra_quote 工具），行情日期 2026-08-14，收盘后数据。",
+  "latency_s": 23.7,
+  "exit_code": 0,
+  "quote_baseline": {
+    "sh600176": {
+      "price": 44.39,
+      "change_pct": 5.94,
+      "error": null
+    },
+    "sh601899": {
+      "price": 32.53,
+      "change_pct": 0.99,
+      "error": null
+    },
+    "sz002414": {
+      "price": 13.92,
+      "change_pct": 0.65,
+      "error": null
+    }
+  },
+  "stderr_tail": "\"deepseek-v4-pro\" is not a model this version of Claude Code recognizes, so auto-compact will keep this session within 200k tokens (the context window it assumes). If the model accepts more, append [1m] to the model name for 1M, or set CLAUDE_CODE_MAX_CONTEXT_TOKENS to its real window; to make it recognized, map it in the modelOverrides setting or update Claude Code; CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT=1 restores the previous wait-for-the-API behavior.\n"
+}

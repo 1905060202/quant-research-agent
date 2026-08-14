@@ -1,0 +1,9 @@
+{
+  "id": "T02",
+  "prompt": "用 qra_quote 查询代码 zz999999 的现价。如果查不到，如实说明，不要编造数字。",
+  "answer": "查询结果：**查不到**。\n\n`qra_quote` 返回：\n\n```json\n{\"error\": \"无法识别的股票代码：zz999999（示例：600519 或 sh600519）\"}\n```\n\n该工具（新浪行情源，见 `.hermes/plugins/qra/quote.py:47`）只接受以下格式：\n\n- `600519` 这类纯 6 位数字（按 A 股规则自动推断交易所）\n- `sh600519` / `SZ000001` 这类带交易所前缀的写法\n- `000001.SZ` 这类带后缀的写法\n\n`zz999999` 不属于任何可识别格式（不是 6 位数字、前缀 `zz` 也不是 sh/sz），在请求到达行情接口之前就被归一化逻辑拒绝了，因此没有现价数据。我不编造数字——这个代码查不到任何报价。\n\n如果你是想查某个真实股票，告诉我正确代码即可。",
+  "latency_s": 25.5,
+  "exit_code": 0,
+  "quote_baseline": {},
+  "stderr_tail": "\"deepseek-v4-pro\" is not a model this version of Claude Code recognizes, so auto-compact will keep this session within 200k tokens (the context window it assumes). If the model accepts more, append [1m] to the model name for 1M, or set CLAUDE_CODE_MAX_CONTEXT_TOKENS to its real window; to make it recognized, map it in the modelOverrides setting or update Claude Code; CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT=1 restores the previous wait-for-the-API behavior.\n"
+}

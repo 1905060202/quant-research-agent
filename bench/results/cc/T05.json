@@ -1,0 +1,9 @@
+{
+  "id": "T05",
+  "prompt": "用 qra_signal 查询今日信号。列出 HOT 榜前三板块（名称+分数），并说明信号模型的时效状态。",
+  "answer": "已通过 `qra_signal`（`top_n=3`，实际调用 `.hermes/plugins/qra/signal.py` 的注册 handler）查询最新信号快照。结果如下：\n\n## HOT 榜前三板块\n\n| 排名 | 板块 | 分数 |\n|---|---|---|\n| 1 | 玻璃玻纤 | 0.850 |\n| 2 | 其他电子Ⅱ | 0.832 |\n| 3 | 基本金属 | 0.824 |\n\n（快照摘要：市场温度 0.5114、情绪 slightly_bullish；COLD 榜前三为股份制银行Ⅱ 0.413 / 包装印刷 0.412 / 家居用品 0.411）\n\n## 信号模型时效状态\n\n诚实标记 `model_is_stale = true`，需要分两层看：\n\n- **数据层：新鲜。** `last_data_date = 2026-08-13`，即截至昨日收盘；快照生成于 2026-08-13 16:27。注意今天（2026-08-14）的 `daily_refresh` 管道尚未产出新快照，所以这份是**最新可得但非\"今日\"收盘后**的快照。\n- **参数层：过期。** 模型参数最后重训于 2026-06-02（71 天前），超过新鲜度阈值被标记 stale。工具本身的注释明确：数据每日刷新 ≠ 模型参数每日重训，`days_since_update=71` 只表示参数未重训，不表示数据过期。\n- **regime 状态：** `insufficient_data`——市场状态判断数据不足，解读信号时应保守。\n\n一句话：榜单分数用的是 8-13 收盘后的新鲜数据，但打分模型本身的参数已 71 天未重训，属\"新鲜数据 + 过期模型\"组合，引用时需如实注明，不能当作全新模型输出。",
+  "latency_s": 42.9,
+  "exit_code": 0,
+  "quote_baseline": {},
+  "stderr_tail": "\"deepseek-v4-pro\" is not a model this version of Claude Code recognizes, so auto-compact will keep this session within 200k tokens (the context window it assumes). If the model accepts more, append [1m] to the model name for 1M, or set CLAUDE_CODE_MAX_CONTEXT_TOKENS to its real window; to make it recognized, map it in the modelOverrides setting or update Claude Code; CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT=1 restores the previous wait-for-the-API behavior.\n"
+}

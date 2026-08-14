@@ -1,0 +1,9 @@
+{
+  "id": "T07",
+  "prompt": "用 qra_kb_fts 检索猎豹模型迭代中关于\"数据泄露\"的教训，说明核心教训并注明来源文档名。",
+  "answer": "检索完成。命中 2 篇文档、7 个片段，核心教训如下：\n\n## 核心教训：高 IC + 逆 decay = 数据泄露指纹\n\n猎豹模型早期（v1 日频 v5，2026-05）曾出现 IC=0.81 的\"完美\"信号，最终确认是数据泄露，修复后 IC 归零到 0.08。两个根因：\n\n**根因 1：NaN→0 填充虚高 IC**\n- 覆盖率仅 41% 时，大量 0 填充使 Spearman rank 被人为抬高，IC=0.81 是假的；100% 覆盖率下真实 IC 仅 0.08\n- 纪律：**覆盖率必须 >80% 才能看 IC**\n\n**根因 2：dropna 破坏日期分布**\n- dropna 导致 train/test 时间边界模糊（日期分布偏移），造成前向泄露\n- 预防：NaN 用 `nan_to_num`，不 dropna\n\n**相关预防条目**：LassoCV 用 `tail(100000)` 选特征含未来数据（前向泄露）→ 改用 LightGBM 原生重要性 + fold 内筛选。\n\n**来源文档：**\n- `ITERATION_HISTORY.md` —— \"v1 — 日频v5（数据泄露·废弃）\"章节，含根因分析和教训固化\n- `CHEETAH_V1_EVOLUTION.md` —— \"v5 daily\"章节 + \"四、失败教训库\"表格（#5、#6 两条泄露教训）\n\n另注：检索时也试了异体写法\"泄漏\"，知识库中无命中——收录文档统一使用\"泄露\"。",
+  "latency_s": 33.6,
+  "exit_code": 0,
+  "quote_baseline": {},
+  "stderr_tail": "\"deepseek-v4-pro\" is not a model this version of Claude Code recognizes, so auto-compact will keep this session within 200k tokens (the context window it assumes). If the model accepts more, append [1m] to the model name for 1M, or set CLAUDE_CODE_MAX_CONTEXT_TOKENS to its real window; to make it recognized, map it in the modelOverrides setting or update Claude Code; CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT=1 restores the previous wait-for-the-API behavior.\n"
+}

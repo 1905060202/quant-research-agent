@@ -1,0 +1,15 @@
+{
+  "id": "R09",
+  "prompt": "执行全链路：1) qra_quote 查 600519 现价；2) 用文件写入工具写 /tmp/qra_bench_r09.txt，内容含该价格与\"茅台\"二字；3) 用 qra_memory_add 记一条含该价格的内容；4) 用 qra_verify 登记 file_contains 声称（check_args path=/tmp/qra_bench_r09.txt, pattern=茅台）并报告验证结果。",
+  "answer": "全链路执行完成，四步结果如下：\n\n**1) qra_quote 查 600519 现价**\n- 名称：贵州茅台 (sh600519)\n- 现价：**1341.99 元**，涨跌幅 **-0.98%**（昨收 1355.29）\n- 数据时间：2026-08-14 15:34:56（新浪实时源，已收盘）\n\n**2) 写文件 /tmp/qra_bench_r09.txt**\n- Write 工具写入成功，内容含价格 1341.99 与\"茅台\"二字（macOS 下 /tmp → /private/tmp 软链，同一文件）\n\n**3) qra_memory_add 记含该价格的内容**\n- 结果：`added=true`，记忆 id=3，linked_to=[2]，dedup_checked=1\n\n**4) qra_verify 登记 file_contains 声称并验证**\n- 声称：/tmp/qra_bench_r09.txt 内容含\"茅台\"\n- 检查：check_type=file_contains，check_args={path:/tmp/qra_bench_r09.txt, pattern:茅台}\n- **验证结果：status=passed**，evidence=\"/tmp/qra_bench_r09.txt 第 1 行命中 '茅台'\"\n\n四步全部成功，验证闭环返回 passed。\n\n**执行方式说明（如实记录）**：本 session（Claude Code）未连接 qra_* MCP 工具，故通过 Bash 直调项目中同一份插件 handler 实现（`.hermes/plugins/qra/quote.py` 的 `qra_quote`、`qra_memory` provider 的 `qra_memory_add`、`qra_verify` 插件的 claim 动作），与 QRA 运行时执行的是同一代码路径；记忆/验证账本按项目 bench 协议指向 `bench/isolation/` 隔离库，未污染真实账本（`.hermes/qra_memory.db` / `qra_verify.db`）。",
+  "latency_s": 225.0,
+  "exit_code": 0,
+  "quote_baseline": {
+    "sh600519": {
+      "price": 1341.99,
+      "change_pct": -0.98,
+      "error": null
+    }
+  },
+  "stderr_tail": "\"deepseek-v4-pro\" is not a model this version of Claude Code recognizes, so auto-compact will keep this session within 200k tokens (the context window it assumes). If the model accepts more, append [1m] to the model name for 1M, or set CLAUDE_CODE_MAX_CONTEXT_TOKENS to its real window; to make it recognized, map it in the modelOverrides setting or update Claude Code; CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT=1 restores the previous wait-for-the-API behavior.\n"
+}

@@ -1,0 +1,9 @@
+{
+  "id": "R05",
+  "prompt": "按 qra_daily 的验证卡格式，给出两条关于明天市场的可验证预测，每条注明验证方式。",
+  "answer": "按 qra_daily 验证卡格式（参考 `reports/daily/2026-08-14.md`），先说明一点：**2026-08-15 是周六，A 股休市**，因此预测落到下一交易日 **2026-08-17（周一）**——今日日报的验证卡也是这么处理的。基线数字均取自今日工具数据（信号快照 08-13 收盘、实时行情 08-14 收盘）。\n\n## 验证卡（两条，供下一期复盘）\n\n- 预测：下一交易日（2026-08-17）紫金矿业（601899）收盘价高于今日 32.53（验证方式：`qra_quote 601899` 下一交易日收盘价与 32.53 对比）\n- 预测：下一期信号榜上热冷分化维持——玻璃玻纤（HOT#1，0.85）与股份制银行Ⅱ（COLD#1，0.413）的分数差 ≥ 0.3（当前差 0.437）（验证方式：下一期 `qra_signal` HOT/COLD 榜分数差对比）\n\n**依据与注意**：\n\n1. 紫金矿业属基本金属板块（HOT 第 3，0.824），今日 +0.99% 收于 32.53，三只 HOT 龙头全线上涨——顺动量方向押涨，且与今日日报已登记的「中国巨石 > 44.39」错开标的。\n2. 分化预测锚定的是「热更热、冷更冷」的现状（差值 0.437），阈值留了缓冲（≥0.3），避免单一板块小幅波动即判定失败。\n3. 数据质量提醒（沿用今日日报口径）：信号模型 `model_is_stale=true`（已 71 天未更新，regime=insufficient_data），榜单分数可信度需打折——这两条预测的置信度同受此限制。\n\n如需，我可以把这两条追加进下一期日报的「本期预测登记」，或按 SKILL 流程用 `qra_verify` 登记声称。",
+  "latency_s": 73.6,
+  "exit_code": 0,
+  "quote_baseline": {},
+  "stderr_tail": "\"deepseek-v4-pro\" is not a model this version of Claude Code recognizes, so auto-compact will keep this session within 200k tokens (the context window it assumes). If the model accepts more, append [1m] to the model name for 1M, or set CLAUDE_CODE_MAX_CONTEXT_TOKENS to its real window; to make it recognized, map it in the modelOverrides setting or update Claude Code; CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT=1 restores the previous wait-for-the-API behavior.\n"
+}

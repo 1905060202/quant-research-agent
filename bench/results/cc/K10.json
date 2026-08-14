@@ -1,0 +1,9 @@
+{
+  "id": "K10",
+  "prompt": "列出方法论家族 v1 中的三个原则或工具，并逐一注明来源文档名。",
+  "answer": "方法论家族 v1 位于 `kb_sources/methodology/` 下，由主文档和第七支（元层）子文档组成。举三个例子：\n\n| # | 原则/工具 | 说明 | 来源文档 |\n|---|----------|------|---------|\n| 1 | **原则 E2：识别反馈回路**（正反馈放大、负反馈稳定，追问\"当前哪个回路主导、什么条件下切换\"） | 🌊 涌现型变体的专用原则 | `kb_sources/methodology/methodology_family_v1.md`（变体二：涌现型） |\n| 2 | **工具 A1：对手人格建模**（Adversary Persona——目标/约束/可选动作/风格/盲区五维画像） | ⚔️ 对抗型变体的专用工具 | `kb_sources/methodology/methodology_family_v1.md`（变体三：对抗型） |\n| 3 | **反叙事装置：随机对照门禁（ES）**（机械对照，叙事无法参与——曾打破\"0.139 模型衰减\"的叙事化证据链） | 🎭 第七支（元层）的八项反叙事装置之一 | `kb_sources/methodology/narrative_awareness_v1.md`（第五、八节） |\n\n补充说明：\n\n- 主文档 `methodology_family_v1.md` 共有六支变体（设计/涌现/对抗/创作/实时/合成），每支含 3–4 条专用原则（E/A/C/R/S 系）和 3–4 件专用工具，外加共享 DNA 七项（穷举本能、交叉验证、衰减意识、对抗本能、预测承诺、量化倾向、密度纪律）。\n- 第七支 `narrative_awareness_v1.md` 是 2026-08-13 新增的元层：五条核心命题、四个劫持机制、叙事生态三维、八个反叙事装置、7 问实践、五条铁律——它悬于六支之上，要求\"先叙事清零，再选变体\"（顺序不可颠倒）。",
+  "latency_s": 26.9,
+  "exit_code": 0,
+  "quote_baseline": {},
+  "stderr_tail": "\"deepseek-v4-pro\" is not a model this version of Claude Code recognizes, so auto-compact will keep this session within 200k tokens (the context window it assumes). If the model accepts more, append [1m] to the model name for 1M, or set CLAUDE_CODE_MAX_CONTEXT_TOKENS to its real window; to make it recognized, map it in the modelOverrides setting or update Claude Code; CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT=1 restores the previous wait-for-the-API behavior.\n"
+}

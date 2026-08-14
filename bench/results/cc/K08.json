@@ -1,0 +1,9 @@
+{
+  "id": "K08",
+  "prompt": "quant_verification_card.md 的核心方法是什么？",
+  "answer": "`quant_verification_card.md`（kb_sources/methodology/ 和 data/qra_kb/ 各一份，内容一致）的核心方法是：**把「量化验证卡」定义为猎豹量化系统 ES-SOP L1 门禁的检查清单**，即写任何投资报告前必跑的 5 项机械验证：\n\n1. **信号新鲜度** — `latest_signal.json` 数据日期是否在 24h 内\n2. **生产信号一致性** — `signal_history_prod.pkl` 最新日期 + 池内 top-3 与今日一致\n3. **top-N alpha** — 最近 window_days 交易日 top-1~3 的回测年化 vs 等权基准\n4. **衰减监控** — 全窗年化 vs 近 20/60/120 日年化，判定平坦/衰减\n5. **模拟盘状态** — 净值 / 持仓 / 今日 top-1 建议\n\n用途：作为日报/研报的「量化信号验证卡」模块，由 `quant-es-sop` skill 在报告撰写前强制执行。",
+  "latency_s": 13.8,
+  "exit_code": 0,
+  "quote_baseline": {},
+  "stderr_tail": "\"deepseek-v4-pro\" is not a model this version of Claude Code recognizes, so auto-compact will keep this session within 200k tokens (the context window it assumes). If the model accepts more, append [1m] to the model name for 1M, or set CLAUDE_CODE_MAX_CONTEXT_TOKENS to its real window; to make it recognized, map it in the modelOverrides setting or update Claude Code; CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT=1 restores the previous wait-for-the-API behavior.\n"
+}

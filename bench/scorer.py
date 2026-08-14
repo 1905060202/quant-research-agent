@@ -47,7 +47,7 @@ NUM_RE = re.compile(r"-?\d+(?:\.\d+)?")
 YEAR_RE = re.compile(r"(?<![\d.])(?:19|20)\d{2}(?![\d.])")
 CODE_RE = re.compile(r"(?<![\d.])\d{6}(?![\d.])")  # 6 位整数=股票代码形态，不是价格
 ROMAN_SUFFIX = re.compile(r"[ⅠⅡⅢⅣⅤ]+$")
-MD_DOC_RE = re.compile(r"[\w一-鿿-]{2,}\.md")
+MD_DOC_RE = re.compile(r"[\w一-鿿.-]{2,}\.md")  # 含点号：research_methodology_v2.1_xxx.md 不能截断
 # 日报类文件名（agent 自己写/引用的 reports/daily/YYYY-MM-DD.md）不是文档引用幻觉
 DATE_FN_RE = re.compile(r"(?:19|20)\d{2}-\d{2}-\d{2}\.md")
 # 捏造价格检测锚定价格语境：数字须紧邻价格词或元/% 才算"价格断言"。
@@ -386,20 +386,35 @@ def main() -> int:
         if not both:
             print("❌ 无结果目录（bench/results/qra|cc）")
             return 2
+        rows = {res["system"]: {r["id"]: r for r in res["rows"]} for res in both}
+
+        def cell(r):
+            if r is None or r["score"] is None:
+                return "—"
+            s = f"{r['score']*100:.0f}%"
+            if r["hallucination"]:
+                s += " 🔴"
+            return s
+
         lines = ["# QRA-Bench v1.0 · QRA vs Claude Code 对照",
                  "",
-                 "| 题号 | 域 | QRA | CC |",
-                 "|---|---|---|---|"]
-        rows_map = {r["id"]: r for res in both for r in res["rows"]}
+                 "| 题号 | 域 | QRA | QRA时延 | CC | CC时延 |",
+                 "|---|---|---|---|---|---|"]
         for q in BENCH["questions"]:
-            a = rows_map.get(q["id"])
-            lines.append(f"| {q['id']} | {q['domain']} | "
-                         f"{a['score']*100:.0f}%" if a and a["score"] is not None else "")
-            lines[-1] += f" | |" if a is None or a["score"] is None else ""
+            qr = rows["qra"].get(q["id"])
+            cr = rows["cc"].get(q["id"])
+            lat = lambda r: f"{r['latency_s']:.0f}s" if r and r.get("latency_s") else "—"
+            lines.append(f"| {q['id']} | {q['domain']} | {cell(qr)} | {lat(qr)} | "
+                         f"{cell(cr)} | {lat(cr)} |")
+        lines += ["", "## 汇总", ""]
         for res in both:
             agg = aggregate(res["rows"])
-            lines += [f"## {res['system'].upper()}",
-                      f"- 总分 {agg['total']:.1f}% · 幻觉率 {agg['hallucination_rate']:.0f}% · 时延 {agg['avg_latency_s']:.1f}s"]
+            dom = " / ".join(f"{d} {v:.0f}%" for d, v in agg["by_domain"].items())
+            lines += [f"### {res['system'].upper()}",
+                      f"- 总分 **{agg['total']:.1f}%**（{agg['answered']}/30 题）",
+                      f"- 幻觉率 **{agg['hallucination_rate']:.0f}%**",
+                      f"- 平均时延 **{agg['avg_latency_s']:.0f}s**",
+                      f"- 分域：{dom}", ""]
         out = PROJECT / "bench" / "score_compare.md"
         out.write_text("\n".join(lines) + "\n", encoding="utf-8")
         print(f"✅ 对照报告 → {out}")

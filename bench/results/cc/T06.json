@@ -1,0 +1,9 @@
+{
+  "id": "T06",
+  "prompt": "用 qra_signal 查询白酒Ⅱ板块今日在冷榜（COLD）的排名。",
+  "answer": "已用 `qra_signal` 查询完成（数据源 `~/hermes_output/quant/latest_signal.json`）。结果如下：\n\n## 白酒Ⅱ 冷榜排名\n\n| 指标 | 值 |\n|---|---|\n| **冷榜内排名** | **第 7 位**（冷榜共 43 个板块） |\n| 全板块排名 | 98 / 94（HOT 51 + COLD 43，排名越高信号越差） |\n| 信号值 | 0.388 |\n| 板块代码 | SW_L2_3405 |\n\n冷榜前 8 名（排名 = 全市场 rank）：\n```\n92 股份制银行Ⅱ  0.413\n93 包装印刷     0.412\n94 家居用品     0.411\n95 旅游及景区   0.408\n96 其他商用车   0.408\n97 饮料乳品     0.394\n98 白酒Ⅱ       0.388   ← 第 7 位\n99 农商行Ⅱ     0.386\n```\n\n**需要诚实说明的两点新鲜度问题：**\n\n1. **最新快照是昨天的**：`latest_signal.json` 生成于 **2026-08-13 16:27**，`last_data_date = 2026-08-13`。今天（8-14）的 daily_refresh 尚未产出新快照（今日 09:00 只有 kline 数据更新），所以严格说这是**截至昨日收盘**的排名，今天的盘中/收盘排名尚未生成。\n2. **模型参数过期**：`model_is_stale = true`，距上次模型参数更新已 **71 天**——榜单是每日用旧参数重算的，IC 可信度需打折。\n\n如需等今日快照生成后再查，或查个股排名（如 `qra_signal({'code': '600519'})`），告诉我即可。",
+  "latency_s": 41.9,
+  "exit_code": 0,
+  "quote_baseline": {},
+  "stderr_tail": "\"deepseek-v4-pro\" is not a model this version of Claude Code recognizes, so auto-compact will keep this session within 200k tokens (the context window it assumes). If the model accepts more, append [1m] to the model name for 1M, or set CLAUDE_CODE_MAX_CONTEXT_TOKENS to its real window; to make it recognized, map it in the modelOverrides setting or update Claude Code; CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT=1 restores the previous wait-for-the-API behavior.\n"
+}
