@@ -8,3 +8,4 @@ class AgentState(TypedDict):
     tool_choice: Optional[str]                # Agent 选择的工具名
     tool_result: Optional[str]                # 工具返回结果
     final_answer: Optional[str]               # 最终回答
+    tool_log: list                            # 工具调用日志（W3 修复：schema 未声明时节点返回被静默丢弃）

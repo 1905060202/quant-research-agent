@@ -76,6 +76,18 @@
 1. max_tokens=600 截断工具调用 JSON → `{"tool": "kb_search", "` 残片被误当最终回答 → 提到 1000 + 截断残片请求续写
 2. DeepSeek 偶发空响应 → 重试逻辑已在，本轮再次触发验证有效（3 次重试后成功）
 
+## W3-4 · AutoGen 量化研究小组（2026-08-14）
+
+| 用例 | 结果 | 说明 |
+|---|---|---|
+| 茅台行情+方法论理由（小组） | ✅ | analyst 真实行情 + librarian 文档检索 + researcher 汇总带来源标注 |
+| 检查点落盘 | ✅ | 结论过门槛才写 team_daily.md，拒绝路径可用 |
+| 对比：单域任务 | 打平 | LangGraph 5.1s vs AutoGen 4.7s，小组有冗余发言 |
+| 对比：跨域任务 | 小组优 | 27.9s vs 5.3s，分工并行+角色隔离（⚠️模型不同有混杂） |
+
+**调试记录（4 个真实 bug）**：model_info 必填 / Anthropic 端点拼 OpenAI SDK 404 / thinking 模型独白混入 content / FunctionTool 单 dict 签名接不住 kwargs
+**框架契约差异**：同一批工具 LangGraph 手写 JSON 传 dict、AutoGen 按签名拆 kwargs——跨框架复用要薄包装（面试弹药）
+
 ## 源码精读记录（三源码交叉）
 - prime-agent（skills.js/frontmatter.js/harness.py）→ D1-D8
 - Hermes（hermes_state.py 8767行/memory_manager.py 1241行）→ D9/D10/D16/D17
