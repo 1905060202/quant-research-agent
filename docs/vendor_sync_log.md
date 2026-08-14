@@ -28,3 +28,25 @@
 - **门禁**: 四层全绿（py_compile ✓ / 单测 9 ✓ / -z ×2 ✓ / 交互 pty ×2 ✓）。
 - **回滚点**: `cd vendor/hermes-agent && git checkout de0abc06 && echo de0abc06 > VERSION`
 - **备注**: 这轮证明了周例同步的完整自动化路径可用，且同日复跑无漂移。
+
+---
+
+## #3 · 2026-08-15 · 0a8765a → cc1c125（QRA 原生命令首秀）
+
+- **范围**: 1 commit（`fix(gateway): honest capability surfaces for profile editors`，2 文件）。
+- **执行方式**: `bin/qra sync`（QRA 原生命令，默认 full：拉取→嫁接面核对→快进→VERSION→门禁），无人工干预。
+- **嫁接面核对**: 零命中 ✓。
+- **门禁**: 四层全绿 ✓。
+- **回滚点**: `cd vendor/hermes-agent && git checkout 0a8765a && echo 0a8765a > VERSION`
+- **备注**: vendor_sync 能力从脚本升格为 QRA 原生命令+agent 工具（核心 src/qra/vendor_sync.py 单一实现，双入口复用）。
+
+---
+
+## #4 · 2026-08-15 · cc1c125 → 11c5aae（agent 工具路径首秀）
+
+- **范围**: 1 commit（`fix(compaction): gate checkpoint replay/prune on current request eligibility`，4 文件）。
+- **执行方式**: 插件工具 `qra_sync` full 模式（handler 直测路径；同日 console 交互中 agent 已成功识别并调用该工具 report 模式）。merged=True, gate_rc=0。
+- **嫁接面核对**: 零命中 ✓。
+- **门禁**: 四层全绿 ✓。
+- **回滚点**: `cd vendor/hermes-agent && git checkout cc1c125 && echo cc1c125 > VERSION`
+- **备注**: 验证中上游连续推进，两次入口各完成一次真实同步——命令与工具都被真实上游验证过，不是纸面测试。

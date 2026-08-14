@@ -1,9 +1,10 @@
 name: qra
-version: 0.2.0
-description: "QRA 量化研究工具集：A股实时行情（新浪源）、猎豹 v2.1 信号摘要、方法论知识库 FTS5 trigram 检索"
+version: 0.3.0
+description: "QRA 量化研究工具集：A股实时行情（新浪源）、猎豹 v2.1 信号摘要、方法论知识库 FTS5 trigram 检索、hermes 上游同步（qra_sync，D009）"
 author: QRA
 kind: standalone
 provides_tools:
   - qra_quote
   - qra_signal
   - qra_kb_fts
+  - qra_sync

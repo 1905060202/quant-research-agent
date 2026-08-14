@@ -14,6 +14,7 @@ from __future__ import annotations
 from .kb import qra_kb_fts
 from .quote import qra_quote
 from .signal import qra_signal
+from .sync import qra_sync
 
 QUOTE_SCHEMA = {
     "type": "object",
@@ -40,6 +41,21 @@ SIGNAL_SCHEMA = {
             "type": "string",
             "description": "可选：查单只股票在预测池的排名，如 600710",
         },
+    },
+}
+
+SYNC_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "mode": {
+            "type": "string",
+            "enum": ["full", "report"],
+            "description": (
+                "full（默认）=完整同步：拉取上游→嫁接面核对→ff-only 快进→"
+                "更新 VERSION 钉针→四层回归门禁（约5分钟，门禁失败自动回滚旧钉针）。"
+                "report=只拉取+核对不落地，用于预检。"
+            ),
+        }
     },
 }
 
@@ -87,6 +103,17 @@ _TOOLS = [
         "📚",
         "知识库全文检索（FTS5 trigram，中英文通吃）：给定检索词返回"
         "最相关文档片段（含出处 doc_name 与命中片段）。默认查 data/kb_fts.db。",
+    ),
+    (
+        "qra_sync",
+        "qra",
+        SYNC_SCHEMA,
+        qra_sync,
+        "🔄",
+        "同步 hermes 上游（NousResearch/hermes-agent）到 QRA vendor：拉取→"
+        "嫁接面 21 项核对→ff-only 快进→更新 VERSION 钉针→四层回归门禁。"
+        "门禁失败自动回滚。用户说'同步 hermes''更新上游'时调用；"
+        "mode=full 完整同步（约5分钟），mode=report 只预检不落地。",
     ),
 ]
 

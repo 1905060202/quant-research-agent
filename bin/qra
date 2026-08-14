@@ -5,6 +5,7 @@
 #   qra console -z "问题"          # prime 式 CoT 全展示终端（推荐）
 #   qra console                    # 多轮交互（Ctrl+T 折叠思考）
 #   qra -z "查一下贵州茅台现价"     # 传统单发问答（只回显最终答复）
+#   qra sync                       # 同步 hermes 上游（拉取→嫁接面核对→快进→门禁）
 #
 # 安装到 PATH（一次性）：
 #   ln -s "$(pwd)/bin/qra" /usr/local/bin/qra
@@ -12,5 +13,10 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 if [[ "${1:-}" == "console" ]]; then
     shift
     exec "$ROOT/scripts/qra_console.sh" "$@"
+fi
+if [[ "${1:-}" == "sync" ]]; then
+    shift
+    cd "$ROOT"
+    exec "$ROOT/.venv-v7/bin/python" -m src.qra.vendor_sync "$@"
 fi
 exec "$ROOT/scripts/run_qra.sh" "$@"

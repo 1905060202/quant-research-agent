@@ -11,17 +11,23 @@
 - vendor/hermes-agent 从 2026-08-15 起持有真实上游历史（浅克隆 depth 会随同步滚动），`git merge --ff-only upstream/main` 随时可用。
 - **禁止**对 vendor 内任何文件做本地修改；QRA 的一切改动必须在 src/qra/ 或 .hermes/plugins/ 中（D002 铁律）。这是 ff-only 永不被破坏的前提。
 
-## 2. 同步流程（scripts/vendor_sync.sh 已机械化）
+## 2. 同步流程（QRA 原生命令 + agent 工具）
+
+同步能力是 QRA 自己的，不是外部脚本（2026-08-15 起）：
 
 ```
-scripts/vendor_sync.sh            # fetch + 嫁接面核对 + 报告（不落地）
-scripts/vendor_sync.sh --apply    # 核对通过后 ff-only 快进 + 更新 VERSION
-scripts/vendor_sync.sh --full     # --apply + 跑完整回归门禁
+qra sync                # 完整同步：拉取→嫁接面核对→快进→VERSION→四层门禁（默认，直接拉）
+qra sync report         # 只拉取+核对，不落地（预检）
+qra sync apply          # 拉取+核对+快进+VERSION，跳过门禁（急用）
 ```
+
+- **核心实现**：`src/qra/vendor_sync.py`（纯 stdlib + git CLI，单一事实来源）。
+- **agent 工具**：插件 `qra_sync`（.hermes/plugins/qra/），对话里说"同步 hermes"即调用；`full` 模式门禁失败**自动回滚旧钉针**。两个入口复用同一核心。
+- **兼容**：`scripts/vendor_sync.sh` 降级为薄壳透传（旧参数 --apply/--full 自动映射）。
 
 五步：
 
-1. **fetch upstream/main**（代理 127.0.0.1:7890 自动探测，大陆直连 GitHub 不稳）。
+1. **fetch upstream/main**（代理 127.0.0.1:7890 自动探测，大陆直连 GitHub 不稳；瞬时 SSL 抖动自动重试一次）。
 2. **嫁接面核对**：diff 出 `旧钉针..新钉针` 的变更文件，与 `GRAFT_PATHS` 清单（21 个 QRA 外部依赖面文件，见 vendor_sync.sh）比对。**命中任何一项 → 拒绝自动落地（exit 2）**，必须人工逐文件看 diff、适配 QRA 侧代码、门禁跑通后再 `--apply`。
 3. **ff-only 快进** `git merge --ff-only upstream/main`。
 4. **VERSION 钉针回写**（上游无 VERSION 文件，这是 QRA 自己的 pin 机制）。
@@ -55,7 +61,7 @@ echo <旧钉针> > VERSION
 - 17d6a7d → de0abc06，44 commits / 56 文件（多为 gateway/desktop/ci 修复）。
 - 嫁接面核对：**21 项零命中**——但注意 4 个文件实质有改动，只是清单外（评估见下）。
 - 门禁：四层全绿（py_compile ✓ / 单测 9 ✓ / -z ×2 ✓ / 交互 pty ×2 ✓）。
-- 同日（上游一小时内又推新 commit）第二次同步 de0abc06 → 0a8765a 完全走 `vendor_sync.sh --full` 脚本化路径：1 commit、嫁接面零命中、ff-only 快进、门禁全绿 —— 每周例行流程当天即得到端到端验证。
+- 同日（上游数小时内连推新 commit）又完成三轮同步：de0abc06→0a8765a（脚本化）、0a8765a→cc1c125（`qra sync` CLI 真同步+门禁全绿）、cc1c125→11c5aae（agent 工具 qra_sync full 模式真同步+门禁全绿）——命令与工具两条入口当天全部得到真实同步验证。
 - 细节记录：docs/vendor_sync_log.md。
 
 ### 5.1 本次 diff 中与 QRA 相关的评估（人工过目结论）
