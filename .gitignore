@@ -31,3 +31,10 @@ data/
 .hermes/.hermes_history
 .hermes/.skills_prompt_snapshot.json
 .hermes/*.log
+
+# W3 记忆/验证账本运行时库（证据见 W3 文档与 transcripts）
+.hermes/qra_memory.db
+.hermes/qra_memory.db-*
+.hermes/qra_verify.db
+.hermes/qra_verify.db-*
+.hermes/verification_evidence.db

@@ -1,0 +1,3 @@
+name: qra_memory
+version: 0.1.0
+description: "QRA 记忆 provider：Mem0 式增量抽取协议（只ADD/去重/叙事链）+ 契约记忆权限分离 + Dream 式每日后台整合。激活：config.yaml memory.provider: qra_memory"

@@ -1,0 +1,8 @@
+name: qra_verify
+version: 0.1.0
+description: "QRA 验证闭环：声称-证据账本 + pre_verify 回合末守卫钩子（声称不过→强制再跑一轮）。检查器全部确定性（实时行情/文件/正则/数值区间），无 LLM 成本。"
+kind: standalone
+provides_tools:
+  - qra_verify
+provides_hooks:
+  - pre_verify
