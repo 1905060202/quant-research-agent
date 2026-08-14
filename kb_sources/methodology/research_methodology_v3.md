@@ -12,7 +12,7 @@ metadata:
     - AgentDisCo (arXiv 2605.11732)
     - NIST Open Deep Research
     - Anthropic Dynamic Workflows (2026.06)
-    - 雅宁反馈 (GTA 6研究四轮迭代 + Hermes超越版多轮审计)
+    - 用户反馈 (GTA 6研究四轮迭代 + Hermes超越版多轮审计)
 ---
 
 # 🔬 深度研究→洞察方法论 v3.0

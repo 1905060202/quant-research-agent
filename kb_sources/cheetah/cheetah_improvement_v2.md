@@ -2,7 +2,7 @@
 
 > 日期: 2026-06-02
 > 状态: 已实施（cheetah_regime.py + cheetah_daily.py + signal_interface.py v2.0 补丁）
-> 作者: Claude Code + 雅宁
+> 作者: Claude Code + 用户
 
 ---
 
