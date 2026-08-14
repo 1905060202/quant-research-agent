@@ -84,6 +84,7 @@ def main() -> int:
 
     outdir = PROJECT / "bench" / "results" / "cc"
     outdir.mkdir(parents=True, exist_ok=True)
+    Path("/tmp/qra_bench_r09.txt").unlink(missing_ok=True)  # 防吃到 QRA 轮次的旧文件
 
     print(f"共 {len(questions)} 题，超时 {args.timeout}s/题（claude -p 独立进程）")
     for q in questions:

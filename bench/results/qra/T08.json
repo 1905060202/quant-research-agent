@@ -1,0 +1,9 @@
+{
+  "id": "T08",
+  "prompt": "分两步执行：1) 用 qra_memory_add 记住\"茅台今日收盘 1341.99 元\"；2) 再执行一次完全相同内容的 qra_memory_add。说明第二次调用的结果（是否判重）。",
+  "answer": "两次调用结果如下：\n\n第一次（qra_memory_add \"茅台今日收盘 1341.99 元\"）：\n  {\"added\": true, \"id\": 1, \"linked_to\": [], \"dedup_checked\": 0}\n  → 正常入库，新记忆 ID = 1。\n\n第二次（完全相同的调用）：\n  {\"added\": false, \"duplicate_of\": \"session_recent\", \"existing\": \"茅台今日收盘 1341.99 元\", \"advice\": \"本会话已抽过这条，直接复用即可\"}\n\n判重结论：第二次调用被判重了，没有重复入库。\n\n具体细节：\n- added=false，说明没有新增。\n- duplicate_of=\"session_recent\"，指出去重命中来源是\"本会话已记\"（session_recent），而不是库内精确/近似对照。这符合该工具的三层去重逻辑（先查本会话已记，再查库内精确，再查近似≥85%）。\n- existing 字段把已存在的那条原文返回了，方便复用。\n- advice 提示直接复用，不要重复写。\n\n补充一点与内存里既有认知的对照：这次命中的是 session_recent（会话内去重）分支，返回的是 duplicate_of 字段而不是 linked_to 叙事链——因为两条内容 100% 完全相同，属于\"本会话已记\"这一层，还没走到近似去重那一步。所以它跟 qra_memory_add 对\"近似重复内容\"返回 added=true + linked_to 的行为并不矛盾，只是重复程度不同（精确相同 vs 近似相似）走了不同的分支。",
+  "latency_s": 16.3,
+  "exit_code": 0,
+  "quote_baseline": {},
+  "stderr_tail": ""
+}

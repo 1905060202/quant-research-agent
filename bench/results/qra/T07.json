@@ -1,0 +1,9 @@
+{
+  "id": "T07",
+  "prompt": "用 qra_kb_fts 检索猎豹模型迭代中关于\"数据泄露\"的教训，说明核心教训并注明来源文档名。",
+  "answer": "用 qra_kb_fts 检索\"猎豹模型 数据泄露\"命中了 ITERATION_HISTORY.md 和 CHEETAH_V1_EVOLUTION.md 共 9 段，核对了 kb_sources/cheetah/ 下的原文，核心教训如下。\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n核心教训（一句话）\n\n高 IC + 逆 IC decay = 数据泄露指纹；行业覆盖率 <80% 时 IC 不可信（虚高可达 10 倍）。\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n具体是怎么暴露的\n\nv1「日频 v5」跑出 IC=0.81，看起来极好，但 IC decay 逆增长（5d=0.03 → 20d=0.07），这是正常信号不会有的形态。追查确认是数据泄露，两个根因：\n\n1. NaN→0 填充：覆盖率仅 41% 时，把大量缺失值填 0，人为抬高了 Spearman rank。\n2. dropna 破坏日期分布：丢弃含 NaN 的行导致日期分布偏移，train/test 时间边界模糊（相当于用了未来数据）。\n\n另一个同根因案例：v5 daily 同样 IC=0.81 → 确认为数据泄露、与 v1 同根因 → 废弃。还有 40 子板块模型初始 IC=0.74，行业覆盖率 34.6% 时虚高，覆盖率修复到 96.2% 后真 IC 只有 0.08。\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n沉淀的检查清单（ITERATION_HISTORY.md 末尾）\n\n1. NaN→0 填充会虚高 IC——永远先查 NaN 比例\n2. 行业覆盖率 <80% = 致命缺陷——IC 虚高可达 10 倍\n3. dropna 破坏日期分布——用 nan_to_num\n4. 全局 80/20 分割 = 信息泄露——必须 purged walk-forward\n（另：LassoCV 用 tail(100000) 全局选特征 = 前向泄露 → 改用 LightGBM fold 内筛选）\n\n一个重要的反向提醒（防止误杀）：IC decay 不递减 ≠ 一定是泄露。20d > 5d 可能是信号累积效应（A 股短周期噪音大、中周期信号浮现），这是 v9 猎豹 v1.0 里验证过的正常现象。\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n来源文档\n\n- ITERATION_HISTORY.md（主要来源，含完整教训清单；kb_sources/cheetah/ITERATION_HISTORY.md）\n- CHEETAH_V1_EVOLUTION.md（佐证：IC=0.81 是数据泄露、dropna 导致日期分布偏移；1% 覆盖率 IC=0.81 是假的）\n\n数据检索时间戳：2026-08-14（知识库为静态文档，无行情时间戳）。",
+  "latency_s": 56.4,
+  "exit_code": 0,
+  "quote_baseline": {},
+  "stderr_tail": ""
+}

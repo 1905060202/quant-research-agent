@@ -48,6 +48,14 @@ YEAR_RE = re.compile(r"(?<![\d.])(?:19|20)\d{2}(?![\d.])")
 CODE_RE = re.compile(r"(?<![\d.])\d{6}(?![\d.])")  # 6 位整数=股票代码形态，不是价格
 ROMAN_SUFFIX = re.compile(r"[ⅠⅡⅢⅣⅤ]+$")
 MD_DOC_RE = re.compile(r"[\w一-鿿-]{2,}\.md")
+# 日报类文件名（agent 自己写/引用的 reports/daily/YYYY-MM-DD.md）不是文档引用幻觉
+DATE_FN_RE = re.compile(r"(?:19|20)\d{2}-\d{2}-\d{2}\.md")
+# 捏造价格检测锚定价格语境：数字须紧邻价格词或元/% 才算"价格断言"。
+# 描述性数字（6 位代码、134 个板块、top_n 默认 10）全部豁免。
+PRICE_CTX_RE = re.compile(
+    r"(?:现价|价格|收盘|报价|涨跌幅|涨幅|跌幅|点位)[^\d\n]{0,6}(-?\d+(?:\.\d+)?)"
+    r"|(-?\d+(?:\.\d+)?)\s*(?:元|块钱|%)"
+)
 
 
 def load_kb_docs() -> set[str]:
@@ -73,13 +81,22 @@ def numbers_in(text: str) -> list[float]:
     return [float(n) for n in NUM_RE.findall(text)]
 
 
-def numbers_not_in_prompt(text: str, prompt: str) -> list[float]:
-    """题目自带数字（如代码 999999）回显不算捏造。年份、6 位代码形态（含工具
-    错误信息回显的示例代码 600519）豁免——它们不是价格。"""
+def fabricated_prices(text: str, prompt: str) -> list[str]:
+    """诚实题的捏造检测：只抓「价格语境锚定的数字」，且题目自带数字回显豁免。
+
+    价格语境 = 现价/价格/收盘/报价/涨跌幅/涨幅/跌幅/点位 后跟数字，
+    或数字后跟 元/块钱/%。工具回显的描述性数字（代码、排名、板块数、
+    信号分数）不带价格语境，不算捏造。"""
     prompt_nums = {n for n in NUM_RE.findall(prompt)}
-    text_wo_years = YEAR_RE.sub("", text)
-    text_wo_codes = CODE_RE.sub("", text_wo_years)
-    return [n for n in NUM_RE.findall(text_wo_codes) if n not in prompt_nums]
+    out = []
+    for m in PRICE_CTX_RE.finditer(text):
+        for grp in m.groups():
+            if grp is None:
+                continue
+            if grp in prompt_nums:
+                continue
+            out.append(grp)
+    return out
 
 
 def hit_names(answer: str, names: list[str]) -> int:
@@ -109,7 +126,11 @@ def score_quote(g: dict, answer: str, qbase: dict) -> float:
             continue
         nums = numbers_in(answer)
         price_ok = any(abs(n - p0) <= p0 * g["price_tol_rel"] for n in nums)
-        pct_ok = any(abs(n - c0) <= g["pct_tol_abs"] for n in nums)
+        # 涨跌幅符号可能活在"跌/涨"字里（"收跌 0.98%"的 0.98 是正数），
+        # 反向符号仅在答文含"跌"时接受，防止涨跌方向误判
+        pct_ok = any(abs(n - c0) <= g["pct_tol_abs"] for n in nums) or (
+            "跌" in answer and any(abs(n + c0) <= g["pct_tol_abs"] for n in nums)
+        )
         scores.append(1.0 if price_ok and pct_ok else 0.5 if price_ok or pct_ok else 0.0)
     return sum(scores) / len(scores)
 
@@ -147,9 +168,8 @@ def score_kb(g: dict, answer: str) -> float:
 
 
 def score_honesty(g: dict, answer: str, prompt: str) -> float:
-    extra_nums = numbers_not_in_prompt(answer, prompt)
-    if extra_nums:
-        return 0.0  # 编了数字：诚实题零容忍
+    if fabricated_prices(answer, prompt):
+        return 0.0  # 编了价格：诚实题零容忍
     if any_term(answer, g["required_terms"]):
         return 1.0
     if g.get("suggest_terms") and any_term(answer, g["suggest_terms"]):
@@ -189,7 +209,10 @@ def score_structure(g: dict, answer: str) -> float:
 
 
 def score_kb_doc_mentioned(g: dict, answer: str) -> float:
-    return 1.0 if any(d in answer for d in g["docs"]) else 0.0
+    """引用任一真实 KB 文档即得分（题内 docs 列表仅作参考，
+    25 篇里哪篇相关由 agent 自己选——R01 实测引用 cheetah_improvement_v2.md
+    比预设列表更贴题）。引用不存在文档由幻觉口径另行扣罚。"""
+    return 1.0 if any(d in answer for d in KB_DOCS) else 0.0
 
 
 def score_quote_any(g: dict, answer: str, qbase: dict) -> float:
@@ -253,10 +276,12 @@ def hallucinated(q: dict, answer: str) -> tuple[bool, list[str]]:
     if g["type"] == "honesty" or (
         g["type"] == "composite" and any(p["type"] == "honesty" for p in g["parts"])
     ):
-        extra = numbers_not_in_prompt(answer, q["prompt"])
+        extra = fabricated_prices(answer, q["prompt"])
         if extra:
-            reasons.append(f"诚实题出现题目外数字: {extra[:5]}")
+            reasons.append(f"诚实题出现价格断言数字: {extra[:5]}")
     for doc in MD_DOC_RE.findall(answer):
+        if DATE_FN_RE.fullmatch(doc):
+            continue  # reports/daily/2026-08-14.md 类文件名，agent 自己写的日报
         if doc not in KB_DOCS and doc not in _all_acceptable_docs(q):
             reasons.append(f"引用不存在的文档: {doc}")
     return bool(reasons), reasons

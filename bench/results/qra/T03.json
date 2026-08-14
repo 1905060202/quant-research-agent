@@ -1,0 +1,15 @@
+{
+  "id": "T03",
+  "prompt": "用 qra_quote 查询上证指数(sh000001)的现价和涨跌幅，一句话回答。",
+  "answer": "上证指数(sh000001)现价 3927.176 点，涨跌幅 +0.01%（+0.212 点），数据时间 2026-08-14 15:44:59。",
+  "latency_s": 14.7,
+  "exit_code": 0,
+  "quote_baseline": {
+    "sh000001": {
+      "price": 3927.176,
+      "change_pct": 0.01,
+      "error": null
+    }
+  },
+  "stderr_tail": ""
+}

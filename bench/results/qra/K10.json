@@ -1,0 +1,9 @@
+{
+  "id": "K10",
+  "prompt": "列出方法论家族 v1 中的三个原则或工具，并逐一注明来源文档名。",
+  "answer": "方法论家族 v1 的源文档是 kb_sources/methodology/methodology_family_v1.md（v1.0，2026-07-08，parent 为 research-methodology-v4.3）。从中取三个原则/工具如下：\n\n1. 原则 E2 —— 识别反馈回路：正反馈放大，负反馈稳定\n   来源文档：kb_sources/methodology/methodology_family_v1.md（\"变体二：🌊 涌现型\"专用原则，第 123–126 行）\n\n2. 工具 E1 —— 力量地图 (Force Map)\n   来源文档：kb_sources/methodology/methodology_family_v1.md（\"变体二：🌊 涌现型\"专用工具，第 142–149 行）\n   要求列出四种力量：推动力(↑)、阻力(↓)、催化力(→)、惯性力(→)，用于理解当前均衡而非预测。\n\n3. 原则 A2 —— 博弈层级建模：至少两层\n   来源文档：kb_sources/methodology/methodology_family_v1.md（\"变体三：⚔️ 对抗型\"专用原则，第 300–305 行）\n   要求：第1层对手表面行动 → 第2层对手期望我如何反应 → 第3层对手真正在玩什么，对抗型分析至少要到第3层。\n\n三个均出自同一份源文档 methodology_family_v1.md；分别属于涌现型（E2、E1）与对抗型（A2）两个变体。",
+  "latency_s": 30.1,
+  "exit_code": 0,
+  "quote_baseline": {},
+  "stderr_tail": ""
+}

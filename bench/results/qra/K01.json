@@ -1,0 +1,9 @@
+{
+  "id": "K01",
+  "prompt": "猎豹 v5 周频截面排名模型为什么被废弃？列出主要原因。",
+  "answer": "猎豹 v5「周频截面排名」模型（2026-05-23）被废弃，主要原因有三个，来自 CHEETAH_V1_EVOLUTION.md 的演进记录和 ITERATION_HISTORY.md 的迭代史。\n\n一句话背景：它当时的 Walk-forward CV IC=0.2343、Blind IC=0.2075，IC decay 单调递减、11 个板块分类，表面看是\"正常\"的好结果，但被后续 v8 审计戳破是虚高。\n\n三个主要原因：\n\n1. LassoCV 前向泄露（致命）\n   用 LassoCV 的 tail(100000) 行选特征时，选出来的特征混入了未来数据，构成前向泄露。这是 v8 审计时才发现的，说明当时 0.23 的 IC 至少部分是假的。教训库第 6 条也记了这条：预防办法是改用 LightGBM 原生特征重要性 + fold 内筛选。\n\n2. 行业映射覆盖率仅 38%\n   行业分类数据源不可靠（东方财富 API），真正能映射到行业的股票只占 38%。这直接触发了\"覆盖率 < 80% 时 IC 虚高是铁律\"这条教训——覆盖不全时，剩下的样本大概率是幸存者偏差，IC 数字没有意义。\n\n3. 板块信号压缩后无区分度\n   只有 11 个申万 L1 大类，粒度太粗，板块信号被压缩得拉不开差异，无法支撑细分投资决策。方向（行业中性化 + 截面排名）是对的，但输出颗粒度撑不起产品化。\n\n三条共同指向同一个结论：v5 的\"好 IC\"建立在泄露 + 低覆盖 + 粗粒度之上，不具备真实预测力，所以被 v7.3 / 后续版本替代，最终收敛到 features_v10.py 版的纯 20 日三层 LGB（诚实 IC 0.12–0.25）作为生产模型。\n\n数据出处：/Users/huyaning/hermes_output/career/tools/quant_research_agent/kb_sources/cheetah/CHEETAH_V1_EVOLUTION.md 第 23–27 行、ITERATION_HISTORY.md 第 26–47 行。",
+  "latency_s": 47.2,
+  "exit_code": 0,
+  "quote_baseline": {},
+  "stderr_tail": ""
+}

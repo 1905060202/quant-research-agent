@@ -1,0 +1,9 @@
+{
+  "id": "K03",
+  "prompt": "猎豹 v5 daily 日频模型为什么被判定 IC 虚高？这件事留下的铁律教训是什么？",
+  "answer": "答案来自猎豹知识库的三份原文（ITERATION_HISTORY.md、CHEETAH_V1_EVOLUTION.md、V5_POSTMORTEM_20260526.md），直接核对过源码，不是凭记忆复述。\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n为什么 v5 daily 日频模型被判 IC 虚高\n\n表面数字：IC = 0.81，看起来是顶级信号。但它有两个\"泄露指纹\"让它当场暴露：\n\n1. IC decay 逆增长（最关键的红旗）\n   正常信号的 IC 随时间衰减：5 日 IC 应大于 20 日 IC。\n   但这个模型 5d=0.03 → 20d=0.07，越远越高，是正常信号不可能有的形态。\n   结论：高 IC + 逆 decay = 数据泄露指纹。\n\n2. 两个根因（追溯确认）\n   - NaN→0 填充：覆盖率只有 41% 时，把大量缺失值填成 0，人为抬高了 Spearman rank。\n   - dropna 破坏日期分布：直接丢弃含 NaN 的行，导致 train/test 的时间边界模糊，等于混入了未来数据（全局切分信息泄露）。\n\n对照案例正好印证量级：41% 覆盖率时 IC=0.81（假），把覆盖率修到 100% 后真 IC 只有 0.08。\n\n所以 v5 daily 和更早的 v1 日频模型是同一个根因，都记为\"数据泄露·废弃\"，代码已删除。\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n留下的铁律教训\n\n文档里明确用\"铁律\"二字固化的是这条：\n\n  覆盖率 < 80% 时，IC 虚高是铁律（虚高可达 10 倍）。\n\n以及配套的判别/预防清单：\n\n1. 高 IC + 逆 decay = 数据泄露指纹——看到先怀疑泄露，别先高兴。\n2. NaN→0 填充会虚高 IC——永远先查 NaN 比例。\n3. dropna 会破坏日期分布——改用 nan_to_num。\n4. 全局 80/20 切分 = 信息泄露——必须用 purged walk-forward。\n5. 分层 IC 验证（大/中/小/微盘）是强制性门禁。\n\n一句反例提醒（防误杀）：IC decay 不递减 ≠ 一定泄露，20d > 5d 也可能是 A 股短周期噪音大、中周期信号浮现的\"信号累积效应\"（v9 猎豹 v1.0 验证过的正常现象）。区分点在于：泄露型是\"全样本覆盖不足 + NaN 填充 + 边界模糊\"三重病根同时在场，而信号累积是覆盖率达标后的诚实结果。\n\n来源文档（绝对路径）：\n- /Users/huyaning/hermes_output/career/tools/quant_research_agent/kb_sources/cheetah/ITERATION_HISTORY.md（v1/v5 daily 条目 + 教训总汇）\n- /Users/huyaning/hermes_output/career/tools/quant_research_agent/kb_sources/cheetah/CHEETAH_V1_EVOLUTION.md（第 13、27、32 行）\n- /Users/huyaning/hermes_output/career/tools/quant_research_agent/kb_sources/cheetah/V5_POSTMORTEM_20260526.md（\"三个 IC 三个真相\" + 永久教训清单）\n\n本回答是模型历史指标查询，不涉及实时行情，故未附行情时间戳。",
+  "latency_s": 47.3,
+  "exit_code": 0,
+  "quote_baseline": {},
+  "stderr_tail": ""
+}

@@ -1,0 +1,15 @@
+{
+  "id": "R09",
+  "prompt": "执行全链路：1) qra_quote 查 600519 现价；2) 用文件写入工具写 /tmp/qra_bench_r09.txt，内容含该价格与\"茅台\"二字；3) 用 qra_memory_add 记一条含该价格的内容；4) 用 qra_verify 登记 file_contains 声称（check_args path=/tmp/qra_bench_r09.txt, pattern=茅台）并报告验证结果。",
+  "answer": "全链路执行完成，四步结果如下：\n\n1) qra_quote 查 600519 现价\n   - 名称：贵州茅台 (sh600519)\n   - 现价：1341.99 元，涨跌幅 -0.98%（昨收 1355.29）\n   - 数据时间戳：2026-08-14 15:34\n\n2) 写文件 /tmp/qra_bench_r09.txt\n   - 内容含价格 1341.99 与\"茅台\"二字，写入成功（resolved 到 /private/tmp/qra_bench_r09.txt，macOS 下 /tmp 是指向 /private/tmp 的软链，同一文件）\n\n3) qra_memory_add 记含该价格的内容\n   - 结果：added=true，记忆 id=2，linked_to=[1]，dedup_checked=1\n\n4) qra_verify 登记 file_contains 声称\n   - 声称：/tmp/qra_bench_r09.txt 含\"茅台\"\n   - 检查：check_type=file_contains，check_args={path:/tmp/qra_bench_r09.txt, pattern:茅台}\n   - 验证结果：status=passed，evidence=\"/tmp/qra_bench_r09.txt 第 1 行命中 '茅台'\"\n\n四步全部成功，验证闭环返回 passed。",
+  "latency_s": 68.9,
+  "exit_code": 0,
+  "quote_baseline": {
+    "sh600519": {
+      "price": 1341.99,
+      "change_pct": -0.98,
+      "error": null
+    }
+  },
+  "stderr_tail": ""
+}

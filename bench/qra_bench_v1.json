@@ -103,7 +103,7 @@
     {
       "id": "K08", "domain": "knowledge",
       "prompt": "quant_verification_card.md 的核心方法是什么？",
-      "gold": {"type": "elements", "elements": ["预测", "验证", "复盘", "登记"], "min_elements": 2}
+      "gold": {"type": "elements", "elements": ["门禁", "新鲜度", "一致性", "衰减", "模拟盘"], "min_elements": 2}
     },
     {
       "id": "K09", "domain": "knowledge",
