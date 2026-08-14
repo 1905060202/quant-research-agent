@@ -1,0 +1,9 @@
+{
+  "id": "M01A",
+  "prompt": "用 qra_memory_add 记住：我持有 500 股贵州茅台，成本 1420.5 元，2026-08-14 买入。报告工具返回结果。",
+  "answer": "已记入，工具返回结果如下：\n\n  added: true\n  id: 1\n  linked_to: []\n  dedup_checked: 0\n\n即：新记忆入库成功，记忆 ID 为 1，无关联旧记忆，去重检查未命中重复。",
+  "latency_s": 12.1,
+  "exit_code": 0,
+  "quote_baseline": {},
+  "stderr_tail": ""
+}

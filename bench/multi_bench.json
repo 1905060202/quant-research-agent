@@ -1,0 +1,26 @@
+{
+  "version": "1.0",
+  "generated": "2026-08-14",
+  "notes": [
+    "W7 长程记忆评测：30 题单轮 bench 未覆盖的记忆跨会话能力",
+    "三题共享同一个隔离记忆库（bench/isolation/qra_memory.db），每题独立 -z 新会话",
+    "M01A 写入 → M01B 新会话回忆 → M02 再新会话重写判重"
+  ],
+  "questions": [
+    {
+      "id": "M01A",
+      "prompt": "用 qra_memory_add 记住：我持有 500 股贵州茅台，成本 1420.5 元，2026-08-14 买入。报告工具返回结果。",
+      "gold": {"type": "elements", "elements": ["added", "true"], "min_elements": 1}
+    },
+    {
+      "id": "M01B",
+      "prompt": "查一下我的持仓记忆：用 qra_memory_search 检索后回答我持有什么股票、多少股。",
+      "gold": {"type": "elements", "elements": ["茅台", "500"], "min_elements": 2}
+    },
+    {
+      "id": "M02",
+      "prompt": "用 qra_memory_add 再记一次同样的内容：我持有 500 股贵州茅台，成本 1420.5 元，2026-08-14 买入。说明第二次调用的结果。",
+      "gold": {"type": "memory_dup", "dup_terms": ["duplicate", "linked_to", "重复", "去重", "已存在"]}
+    }
+  ]
+}
