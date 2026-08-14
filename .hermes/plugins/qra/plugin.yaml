@@ -1,0 +1,7 @@
+name: qra
+version: 0.1.0
+description: "QRA 量化研究工具集：A股实时行情（新浪源）、猎豹信号、方法论知识库检索"
+author: QRA
+kind: standalone
+provides_tools:
+  - qra_quote

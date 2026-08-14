@@ -1,0 +1,33 @@
+# 敏感文件（含明文 API key，零凭据铁律，永不入库）
+HANDOFF_新session必读.md
+
+# 运行环境
+.venv-v7/
+vendor/
+__pycache__/
+*.pyc
+.DS_Store
+
+# v8 时代运行时数据（实验产物，不入库）
+data/
+
+# HERMES_HOME 运行时状态（只跟踪 .hermes/config.yaml 与 .hermes/plugins/ 定制层源码）
+.hermes/sessions/
+.hermes/logs/
+.hermes/state.db
+.hermes/state.db-*
+.hermes/memories/
+.hermes/cache/
+.hermes/cron/
+.hermes/hooks/
+.hermes/skills/
+.hermes/audio_cache/
+.hermes/image_cache/
+.hermes/pairing/
+.hermes/sandboxes/
+.hermes/auth.json
+.hermes/auth.lock
+.hermes/SOUL.md
+.hermes/.hermes_history
+.hermes/.skills_prompt_snapshot.json
+.hermes/*.log

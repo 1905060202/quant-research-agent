@@ -1,0 +1,17 @@
+# QRA v8 · Hermes 基座配置（DeepSeek）
+model:
+  default: "deepseek/deepseek-v4-flash"
+  provider: "anthropic"
+
+# 记忆
+memory:
+  provider: "openviking"  # 或留空用内置 MEMORY.md
+
+# 会话
+database:
+  journal_mode: "wal"
+
+# QRA 领域技能目录
+skills:
+  extra_roots:
+    - "~/hermes_output/career/tools/quant_research_agent/skills"
