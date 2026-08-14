@@ -1,0 +1,30 @@
+# vendor 同步日志
+
+每条记录：旧钉针→新钉针、commit 数、嫁接面核对、门禁结果、备注。流程见 docs/decisions/D009_vendor同步流程.md。
+
+---
+
+## #1 · 2026-08-15 · 17d6a7d → de0abc06（首次同步）
+
+- **范围**: 44 commits / 56 文件（upstream main 线性推进，behind_by=0 → ff-only）。
+- **内容**: 多为 gateway/desktop/ci 修复；与 QRA 相关的实质改动：`hermes_state.py` 增 `update_session_model(session_id, model, provider=None)` 可选参数（纯增量）、`hermes_cli/main.py` -z 启动守卫（已验证 deepseek-v4-pro 不触发）、`tools/approval.py` EXEC_ASK 泄漏修复、`agent/context_compressor.py` +5/-1、`agent/error_classifier.py` +2。
+- **嫁接面核对**: GRAFT_PATHS 21 项零命中（上述文件均不在清单内，人工过目无破坏）。
+- **门禁**: 全绿（scripts/verify_qra.sh 完整四层，GATE_RC=0）。
+  - py_compile ✓
+  - 单测 9 项 ✓（0.846s）
+  - -z 真实 API ×2 ✓（新浪同源价格 1341.99 动态对照）
+  - console 交互 pty 竞态 ×2 ✓
+- **门禁暴露并修复的自身问题**: `scripts/_e2e_helpers.py` run_z 存在 EOF/退出码竞态——子进程写完立即 exit 时，EOF 先于 `waitpid(WNOHANG)` 到达，父进程 break 错过 reap，僵尸进程被误判 240s 超时。旧 vendor 退出时序恰好掩盖了它；新 vendor 暴露。修复：EOF 后进入轮询 reap 阶段（0.2s 间隔）直至拿到真实 rc。**这就是门禁存在的价值——首次同步当天就抓住了一个潜伏的测试竞态。**
+- **回滚点**: `cd vendor/hermes-agent && git checkout 17d6a7d && echo 17d6a7d > VERSION`
+- **备注**: vendor 从本次起持有真实上游历史（浅克隆 depth 随同步滚动），旧快照备份在 /tmp/hermes-agent.old-17d6a7d/（可删）。上游推进极快（同步当天一小时内又从 de0abc06 推到 0a8765a），周频同步节奏有现实依据。
+
+---
+
+## #2 · 2026-08-15 · de0abc06 → 0a8765a（同日，首次完全脚本化）
+
+- **范围**: 1 commit（`fix(gateway): model inheritance gated on the model section, not config.yaml existence`，tui_gateway/methods_profiles.py，+27/-11）。
+- **执行方式**: `scripts/vendor_sync.sh --full` 全自动（fetch → 嫁接面核对 → ff-only 快进 → VERSION 回写 → 回归门禁），无人工干预。SYNC_RC=0。
+- **嫁接面核对**: 零命中 ✓（gateway 侧改动，不在 GRAFT_PATHS）。
+- **门禁**: 四层全绿（py_compile ✓ / 单测 9 ✓ / -z ×2 ✓ / 交互 pty ×2 ✓）。
+- **回滚点**: `cd vendor/hermes-agent && git checkout de0abc06 && echo de0abc06 > VERSION`
+- **备注**: 这轮证明了周例同步的完整自动化路径可用，且同日复跑无漂移。
