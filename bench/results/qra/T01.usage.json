@@ -1,0 +1,18 @@
+{
+  "estimated_cost_usd": 0.0,
+  "cost_status": "unknown",
+  "cost_source": "none",
+  "input_tokens": 14920,
+  "output_tokens": 390,
+  "cache_read_tokens": 18560,
+  "cache_write_tokens": 0,
+  "reasoning_tokens": 0,
+  "total_tokens": 33870,
+  "api_calls": 2,
+  "model": "deepseek-v4-pro",
+  "provider": "anthropic",
+  "session_id": "20260814_201505_4edb37",
+  "completed": true,
+  "failed": false,
+  "service_tier": null
+}
