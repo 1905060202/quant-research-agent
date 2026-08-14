@@ -1,15 +1,27 @@
 #!/usr/bin/env bash
 # QRA 命令入口：本质是 Hermes 引擎 + QRA 定制层（融合架构，D002）
 #
-# 用法：
-#   qra console -z "问题"          # prime 式 CoT 全展示终端（推荐）
-#   qra console                    # 多轮交互（Ctrl+T 折叠思考）
-#   qra -z "查一下贵州茅台现价"     # 传统单发问答（只回显最终答复）
-#   qra sync                       # 同步 hermes 上游（拉取→嫁接面核对→快进→门禁）
+# 用法（安装到 PATH 后任意目录可用）：
+#   qra                             # 直接进系统：prime 式 CoT 多轮交互（Ctrl+T 折叠思考）
+#   qra console                     # 同上（显式写法）
+#   qra console -z "问题"           # 单发，CoT 全展示
+#   qra -z "查一下贵州茅台现价"      # 传统单发问答（只回显最终答复）
+#   qra sync                        # 同步 hermes 上游（拉取→嫁接面核对→快进→门禁）
 #
-# 安装到 PATH（一次性）：
+# 安装到 PATH（一次性，二选一；推荐 ~/.local/bin 无需 sudo）：
+#   ln -s "$(pwd)/bin/qra" ~/.local/bin/qra
 #   ln -s "$(pwd)/bin/qra" /usr/local/bin/qra
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+set -euo pipefail
+
+# 符号链接安全解析：qra 装在 PATH 里时 $0 是链接路径，必须还原真实脚本位置
+SOURCE="$0"
+while [ -L "$SOURCE" ]; do
+    DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+    SOURCE="$(readlink "$SOURCE")"
+    [[ "$SOURCE" != /* ]] && SOURCE="$DIR/$SOURCE"
+done
+ROOT="$(cd -P "$(dirname "$SOURCE")/.." && pwd)"
+
 if [[ "${1:-}" == "console" ]]; then
     shift
     exec "$ROOT/scripts/qra_console.sh" "$@"
@@ -18,5 +30,9 @@ if [[ "${1:-}" == "sync" ]]; then
     shift
     cd "$ROOT"
     exec "$ROOT/.venv-v7/bin/python" -m src.qra.vendor_sync "$@"
+fi
+if [[ $# -eq 0 ]]; then
+    # 裸 qra = 进入系统（对齐 claude/hermes 的交互入口习惯）
+    exec "$ROOT/scripts/qra_console.sh"
 fi
 exec "$ROOT/scripts/run_qra.sh" "$@"

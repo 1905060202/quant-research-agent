@@ -28,10 +28,12 @@ uv pip install -e vendor/hermes-agent --no-deps --python .venv-v7/bin/python
 #    ANTHROPIC_AUTH_TOKEN / ANTHROPIC_BASE_URL / ANTHROPIC_MODEL
 
 # 4. 运行（推荐走 qra 命令入口，加 PATH 后任意目录可用）
-ln -s "$(pwd)/bin/qra" /usr/local/bin/qra   # 一次性
-qra -z "查一下贵州茅台现价"                    # 单发问答，只回显最终答复
-qra                                        # 交互模式
-# 入口本质：bin/qra → scripts/run_qra.sh → hermes 引擎 + QRA 定制层
+ln -s "$(pwd)/bin/qra" ~/.local/bin/qra     # 一次性，无需 sudo（备选 /usr/local/bin/qra）
+qra                                        # 直接进系统：prime 式 CoT 多轮交互（Ctrl+T 折叠思考）
+qra -z "查一下贵州茅台现价"                    # 传统单发问答，只回显最终答复
+qra sync                                   # 同步 hermes 上游（拉取→嫁接面核对→快进→门禁，D009）
+# 入口本质：bin/qra 符号链接安全解析 → 裸调/console 走 scripts/qra_console.sh（CoT 全展示）
+#           qra sync 走 src.qra.vendor_sync，其余单发走 scripts/run_qra.sh
 
 # 5. 跑评测（30 题，动态 gold 自动重采行情）
 .venv-v7/bin/python bench/run_qra.py
