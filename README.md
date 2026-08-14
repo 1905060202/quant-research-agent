@@ -27,8 +27,11 @@ uv pip install -e vendor/hermes-agent --no-deps --python .venv-v7/bin/python
 # 3. 凭据：环境变量注入（零落盘，HANDOFF 文件已 gitignore）
 #    ANTHROPIC_AUTH_TOKEN / ANTHROPIC_BASE_URL / ANTHROPIC_MODEL
 
-# 4. 运行单发问答
-./scripts/run_qra.sh -z "查一下贵州茅台现价"
+# 4. 运行（推荐走 qra 命令入口，加 PATH 后任意目录可用）
+ln -s "$(pwd)/bin/qra" /usr/local/bin/qra   # 一次性
+qra -z "查一下贵州茅台现价"                    # 单发问答，只回显最终答复
+qra                                        # 交互模式
+# 入口本质：bin/qra → scripts/run_qra.sh → hermes 引擎 + QRA 定制层
 
 # 5. 跑评测（30 题，动态 gold 自动重采行情）
 .venv-v7/bin/python bench/run_qra.py

@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# QRA 命令入口：本质是 Hermes 引擎 + QRA 定制层（融合架构，D002）
+#
+# 用法：
+#   qra -z "查一下贵州茅台现价"     # 单发问答（只回显最终答复）
+#   qra                             # 交互模式
+#
+# 安装到 PATH（一次性）：
+#   ln -s "$(pwd)/bin/qra" /usr/local/bin/qra
+exec "$(cd "$(dirname "$0")/.." && pwd)/scripts/run_qra.sh" "$@"
