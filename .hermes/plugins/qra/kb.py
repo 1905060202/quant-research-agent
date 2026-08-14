@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sqlite3
 from pathlib import Path
 
@@ -32,8 +33,20 @@ def _resolve_path(raw: str | None) -> Path:
     return DEFAULT_KB_PATH
 
 
-def _search_trigram(conn: sqlite3.Connection, query: str, limit: int) -> list[dict]:
-    """trigram 精确短语检索（query ≥3 字符才有效）。"""
+def _split_terms(query: str) -> tuple[list[str], list[str]]:
+    """查询分词：连续中英文字母数字算词。
+    返回 (trigram 可用词 ≥3 字符, 短词 2 字符)。
+    单字符片断丢弃（无检索价值且会撞 trigram 语法）。"""
+    terms = re.findall(r"[一-鿿A-Za-z0-9]{2,}", query)
+    trig = [t for t in terms if len(t) >= 3]
+    short = [t for t in terms if len(t) == 2]
+    return trig, short
+
+
+def _search_trigram(conn: sqlite3.Connection, trig_terms: list[str],
+                    limit: int) -> list[dict]:
+    """trigram 多词 OR 检索（每个词加引号做短语，保护连字符等运算符）。"""
+    expr = " OR ".join(json.dumps(t, ensure_ascii=False) for t in trig_terms)
     rows = conn.execute(
         """
         SELECT d.id, d.doc_name,
@@ -44,26 +57,31 @@ def _search_trigram(conn: sqlite3.Connection, query: str, limit: int) -> list[di
         ORDER BY bm25(docs_fts_trigram)
         LIMIT ?
         """,
-        (json.dumps(query, ensure_ascii=False).strip('"'), limit),
+        (expr, limit),
     ).fetchall()
     return rows
 
 
-def _search_like(conn: sqlite3.Connection, query: str, limit: int) -> list[dict]:
-    """LIKE 子串兜底：短查询或 trigram 无结果时用。"""
-    pattern = f"%{query}%"
+def _search_like(conn: sqlite3.Connection, terms: list[str],
+                 limit: int) -> list[dict]:
+    """LIKE 兜底：任一词子串命中即返回（多词 OR，而不是整串单子串）。
+    2 字符词只能走这条路（trigram 索引不含 <3 字符 token）。"""
+    clauses = " OR ".join("chunk LIKE ?" for _ in terms)
+    params = [f"%{t}%" for t in terms]
     rows = conn.execute(
-        """
+        f"""
         SELECT id, doc_name, chunk
         FROM documents
-        WHERE chunk LIKE ? OR doc_name LIKE ?
+        WHERE {clauses}
         LIMIT ?
         """,
-        (pattern, pattern, limit),
+        (*params, limit),
     ).fetchall()
     out = []
     for row_id, doc_name, chunk in rows:
-        idx = chunk.find(query)
+        idx = next(
+            (i for t in terms if (i := chunk.find(t)) >= 0), 0
+        )
         start = max(0, idx - 60)
         snip = chunk[start : start + SNIPPET_CHARS]
         if start > 0:
@@ -100,21 +118,33 @@ def qra_kb_fts(args: dict, **_kw) -> str:
         return json.dumps({"error": f"知识库打不开：{e}"}, ensure_ascii=False)
 
     try:
-        rows = []
+        trig, short = _split_terms(query)
+        rows: list[tuple] = []
         method = "trigram"
-        if len(query) >= 3:
+        if trig:
             try:
-                rows = _search_trigram(conn, query, limit)
+                rows = _search_trigram(conn, trig, limit)
             except sqlite3.Error:
                 rows = []  # MATCH 语法异常或查询层错误，落兜底
-        if not rows:
-            method = "like_fallback"
-            rows = _search_like(conn, query, limit)
+        # 2 字符词只能走 LIKE（trigram 索引不含 <3 字符 token），补足结果
+        if short and len(rows) < limit:
+            method = "trigram+like" if rows else "like"
+            seen = {r[0] for r in rows}
+            for e in _search_like(conn, short, limit):
+                if e[0] not in seen:
+                    rows.append(e)
+                    seen.add(e[0])
+        # 整串不可分词（如 "C++"）→ 整串 LIKE 兜底
+        if not rows and not (trig or short):
+            method = "like_full"
+            rows = _search_like(conn, [query], limit)
         if not rows:
             return json.dumps(
-                {"query": query, "hits": 0, "note": "知识库没有命中，可能超出收录范围"},
+                {"query": query, "hits": 0, "method": method,
+                 "note": "知识库没有命中，可能超出收录范围"},
                 ensure_ascii=False,
             )
+        rows = rows[:limit]  # trigram + LIKE 叠加后裁到 limit
         hits = [
             {"id": r[0], "doc_name": r[1], "snippet": r[2][:SNIPPET_CHARS]}
             for r in rows
