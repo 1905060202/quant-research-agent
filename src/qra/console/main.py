@@ -82,13 +82,18 @@ def render(state: TurnState, usage: dict | None, model: str) -> Group:
             if state.show_thinking:
                 style = "grey62"
                 content: object = Markdown(blk["text"], style=style)
-                title = "💭 思考" + (" …" if blk["open"] else "")
+                # Claude Code 式思考提示：标题带计时（"思考 3s"）
+                if blk.get("open"):
+                    elapsed = time.time() - blk.get("started", time.time())
+                    title = f"✻ 思考 {elapsed:.0f}s"
+                else:
+                    title = "✻ 思考"
                 parts.append(
                     Panel(content, border_style=style, box=box.ROUNDED,
                           title=title, title_align="left", padding=(0, 1))
                 )
             else:
-                parts.append(Text(f"💭 {_thinking_recap(blk['text'])}",
+                parts.append(Text(f"✻ 思考 · {_thinking_recap(blk['text'])}",
                                   style="grey62"))
         elif blk["kind"] == "text":
             parts.append(Markdown(blk["text"]))
@@ -99,41 +104,52 @@ def render(state: TurnState, usage: dict | None, model: str) -> Group:
             parts.append(Text(f"  · {line}", style="dim yellow"))
     if usage:
         parts.append(_render_usage(usage, model))
+    if not parts:
+        # 首 token 前的等待帧：发问后立刻有反馈，杜绝"一片空白"
+        frames = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+        f = frames[int(time.time() * 8) % len(frames)]
+        parts.append(Text(f"{f} 思考中…", style="dim"))
     return Group(*parts)
 
 
 def _render_tool_block(parts: list, blk: dict) -> None:
+    """Claude Code 式工具块：⏺ 名称 + args 摘要 + 缩进结果预览。
+    delegate_task 是 hermes 的 subagent 委派工具——识别为嵌套子代理面板。"""
+    name = blk["name"]
+    is_subagent = name in ("delegate_task", "spawn_task", "spawn")
+    title = "⎇ 子代理" if is_subagent else "⏺ 工具"
     if blk.get("status") == "generating":
-        parts.append(Panel(
-            Text(f"{blk['name']} 参数生成中…", style="cyan"),
-            border_style="cyan", box=box.ROUNDED, title="⚙ 工具",
-            title_align="left", padding=(0, 1),
-        ))
+        parts.append(Text(f"{title} {name} 参数生成中…", style="cyan"))
         return
     if blk.get("status") == "running":
-        inner = Text(f"{blk['name']}\n", style="bold cyan")
-        inner.append(Text(_compact_args(blk.get("args")), style="dim"))
-        inner.append(Text("\n执行中…", style="cyan"))
+        inner = Text(f"{name}", style="bold cyan")
+        args = _compact_args(blk.get("args"))
+        if args:
+            inner.append(Text(f"\n  {args}", style="dim"))
+        inner.append(Text("\n  ⠋ 执行中…", style="cyan"))
         parts.append(Panel(inner, border_style="cyan", box=box.ROUNDED,
-                           title="⚙ 工具", title_align="left", padding=(0, 1)))
+                           title=title, title_align="left", padding=(0, 1)))
         return
     # done
-    inner = Text(f"{blk['name']}", style="bold cyan")
+    inner = Text(f"{name}", style="bold cyan")
     inner.append(Text(f" · {blk.get('duration', 0):.2f}s", style="dim"))
-    inner.append(Text("\n", style="dim"))
-    inner.append(Text(_compact_args(blk.get("args")), style="dim"))
+    args = _compact_args(blk.get("args"))
+    if args:
+        inner.append(Text(f"\n  {args}", style="dim"))
     result = blk.get("result") or ""
     if len(result) > _RESULT_PREVIEW_MAX:
         result = result[:_RESULT_PREVIEW_MAX] + (
             f"\n…（已截断，共 {len(blk.get('result') or '')} 字符）")
     if result.strip():
-        inner.append(Text("\n" + result.strip(), style="grey74"))
+        # 缩进呈现（CC 式嵌套内容），换行保持缩进
+        indented = "\n  ".join(result.strip().splitlines())
+        inner.append(Text("\n  " + indented, style="grey74"))
     ok = blk.get("ok", True)
     parts.append(Panel(
         inner,
         border_style="green" if ok else "red",
         box=box.ROUNDED,
-        title="⚙ 工具 ✓" if ok else "⚙ 工具 ✗",
+        title=f"{title} ✓" if ok else f"{title} ✗",
         title_align="left", padding=(0, 1),
     ))
 
@@ -202,7 +218,8 @@ def apply(state: TurnState, ev) -> None:
     kind = ev[0]
     if kind == "reasoning":
         if not state.blocks or state.blocks[-1]["kind"] != "thinking":
-            state.blocks.append({"kind": "thinking", "text": "", "open": True})
+            state.blocks.append({"kind": "thinking", "text": "", "open": True,
+                                 "started": time.time()})
         state.blocks[-1]["text"] += ev[1]
     elif kind == "delta":
         text = ev[1]
@@ -412,10 +429,23 @@ class InputLayer:
 def _render_loop(events: "queue.Queue", state: TurnState, live: Live,
                  result_holder: dict) -> None:
     """消费事件，drain 后一帧 reconcile（prime pi-tui 同款节流）。"""
+    # 事件到达时间戳 trace（QRA_EVENT_TRACE=1 时写 /tmp/qra_event_trace.txt，
+    # 诊断流式节奏用：判断上游是逐 delta 实时到达还是攒批一次性到达）
+    trace = [] if os.getenv("QRA_EVENT_TRACE") else None
+    trace_t0 = time.time()
     while True:
-        ev = events.get()
+        try:
+            ev = events.get(timeout=0.25)
+        except queue.Empty:
+            # 无事件时只刷新等待帧（spinner 动画）；有内容后不空转
+            if not state.blocks and not state.statuses:
+                live.update(render(state, None, result_holder["model"]))
+            continue
         if ev[0] == "sentinel":
             break
+        if trace is not None:
+            trace.append(f"{time.time() - trace_t0:7.2f}s  {ev[0]}"
+                         f"{' ' + str(ev[1])[:60] if len(ev) > 1 else ''}")
         apply(state, ev)
         done = False
         # 排空已到事件，一次渲染
@@ -431,6 +461,12 @@ def _render_loop(events: "queue.Queue", state: TurnState, live: Live,
         live.update(render(state, None, result_holder["model"]))
         if done or ev[0] == "turn_end":
             break
+    if trace is not None:
+        try:
+            with open("/tmp/qra_event_trace.txt", "w", encoding="utf-8") as f:
+                f.write("\n".join(trace) + "\n")
+        except OSError:
+            pass
 
 
 # ---------------------------------------------------------------- agent 构造
@@ -586,7 +622,12 @@ def run_turn(agent, session_db, events, state, prompt: str,
     from contextlib import redirect_stderr, redirect_stdout
 
     buf_out, buf_err = io.StringIO(), io.StringIO()
-    live = Live(render(state, None, result_holder["model"]), console=console,
+    # 渲染必须绑定此刻的真实 stdout：run_conversation 期间 redirect_stdout
+    # 会把 sys.stdout 换成 StringIO（捕获工具打印防撕裂），而 rich Console
+    # 无 file 参数时动态跟随 sys.stdout——渲染帧会被吞进缓冲区，表现为
+    # 整轮屏幕空白、结束后内容一次性涌出。显式绑定后 redirect 不影响渲染。
+    render_console = Console(file=sys.stdout)
+    live = Live(render(state, None, result_holder["model"]), console=render_console,
                 refresh_per_second=20, vertical_overflow="visible")
     live.start()
     renderer = threading.Thread(
@@ -694,13 +735,14 @@ def main(argv=None) -> int:
             return 0
 
         # 多轮交互：会话级输入层（回合中打字不丢失、不回显进重定向缓冲区）
-        console.print(Text("QRA 控制台 · prime 式 CoT 全展示 · Ctrl+T 折叠思考 · "
-                           "空输入退出", style="bold cyan"))
+        console.print(Text("quant-agent · 量化研究智能体", style="bold cyan"))
+        console.print(Text("prime 式 CoT 全展示 · Ctrl+T 折叠思考 · 空行退出",
+                           style="dim"))
         inp = InputLayer(state)
         inp.start()
         try:
             while True:
-                console.print(Text("你 › ", style="bold green"), end="")
+                console.print(Text("❯ ", style="bold green"), end="")
                 inp.redraw()  # 回合中已有的半行草稿补回显到新提示符后
                 try:
                     user_input = inp.pop()
