@@ -11,6 +11,7 @@
 | build_kb.py | KB 灌库脚本 | `.hermes/plugins/qra/kb.py`（工具插件内建） |
 | refine.py | 双评审门精炼回路（v5） | 待 D008 落地时在插件侧重做（qra_refine） |
 | tools/（registry/market/kb） | 自研工具注册表 | `.hermes/plugins/qra/`（quote/signal/kb/sync 插件工具） |
+| qra_config.yaml | v8 时代全局配置（model/memory/database/skills） | 零引用；现行架构参数由 bin/qra + scripts/ 运行时直传，无配置文件 |
 
 **当前活跃代码图**（唯一执行线）：
 

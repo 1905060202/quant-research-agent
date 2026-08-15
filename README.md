@@ -16,9 +16,9 @@
 ## 快速开始
 
 ```bash
-# 1. 底座（pin 17d6a7d，见 vendor/README 或上游仓库）
+# 1. 底座（pin 11c5aae，见 vendor/README 或上游仓库）
 git clone https://github.com/NousResearch/hermes-agent.git vendor/hermes-agent
-cd vendor/hermes-agent && git checkout 17d6a7d && cd ../..
+cd vendor/hermes-agent && git checkout 11c5aae && cd ../..
 
 # 2. 依赖 + 底座安装（uv 环境）
 uv venv .venv-v7 --python 3.12

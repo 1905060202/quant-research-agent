@@ -6,7 +6,7 @@
 记录：时延 / 工具调用次数（AutoGen 数 ToolCallExecutionEvent）/ 结论对比。
 对比的价值不在"谁赢"，在看清两种编排的成本结构差异（面试弹药）。
 
-用法（src/qra/ 下）：../../.venv/bin/python agents/run_compare.py
+用法（src/qra/ 下）：../../.venv-v7/bin/python agents/run_compare.py
 """
 import asyncio
 import sys
