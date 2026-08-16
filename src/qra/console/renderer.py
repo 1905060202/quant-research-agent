@@ -155,25 +155,30 @@ class TurnRenderer:
             self._move_to_content_end()
 
     def _line(self, obj: Any, **kw) -> int:
-        """打印一行并记账；返回占屏行数。"""
-        self._sync_cursor()
-        self._last_content_at = time.time()
-        rows = self._tio.print(obj, **kw)
-        self._raw_rows[self._row] = (obj, dict(kw))
-        self._row += rows
-        self._note_content_end()
-        return rows
+        """打印一行并记账；返回占屏行数。「move→print」整体持锁：帧绘制
+        插不进来（与 append_line 同纪律，2026-08-17 审计 F-04）。"""
+        with self._tio.locked():
+            self._sync_cursor()
+            self._last_content_at = time.time()
+            rows = self._tio.print(obj, **kw)
+            self._raw_rows[self._row] = (obj, dict(kw))
+            self._row += rows
+            self._note_content_end()
+            return rows
 
     def _raw_text(self, text: str, style: str | None = None) -> None:
-        """流式追加（不换行记账，闭合时重测）。"""
-        self._sync_cursor()
-        self._last_content_at = time.time()
-        if style:
-            self._tio.print(Text(text, style=style), end="", markup=False,
-                            soft_wrap=True)
-        else:
-            self._tio.print(text, end="", markup=False, soft_wrap=True)
-        self._note_content_end()
+        """流式追加（不换行记账，闭合时重测）。同 append_line 整体持锁
+        （2026-08-17 审计 F-04：旧版 move→print 两步间可插入帧重绘，
+        token 打进输入框区）。"""
+        with self._tio.locked():
+            self._sync_cursor()
+            self._last_content_at = time.time()
+            if style:
+                self._tio.print(Text(text, style=style), end="", markup=False,
+                                soft_wrap=True)
+            else:
+                self._tio.print(text, end="", markup=False, soft_wrap=True)
+            self._note_content_end()
 
     def append_line(self, obj: Any = "", **kw) -> int:
         """主线程/命令路径的内容输出：光标移到内容尾再印（帧外调用安全）。

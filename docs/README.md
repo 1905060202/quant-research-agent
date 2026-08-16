@@ -24,6 +24,7 @@
 | `docs/ci.md` | ★ 权威 | CI 管道与本地/CI 矩阵 |
 | `docs/reference.md` | ★ 权威 | 命令/工具/API/env/config 速查 |
 | `docs/troubleshooting.md` | ★ 权威 | 已知坑（症状→根因→解法） |
+| `docs/console_全面审计_2026-08-17.md` | #74 路线图 | console 三通道审计（健壮性 F-01~F-17 / 设计 D-01~D-07 / 命令 15vs95）与 5 批修复计划，批次落地前为执行权威 |
 | `docs/vendor_sync_log.md` | ★ 权威（账本） | 每次上游同步 + 嫁接面核对 + 回滚点 |
 | `docs/decisions/`（D001-D010） | ★ 权威（决策） | ADR 制度，状态 accepted |
 | `bench/README.md` | ★ 权威（评测口径） | 30 题设计口径与文件 |

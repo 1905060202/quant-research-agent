@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import io
 import os
+import re
 import shutil
 import sys
 import threading
@@ -36,11 +37,36 @@ from typing import Any, Iterator
 from rich.cells import cell_len
 from rich.console import Console
 
+# 显示净化：剥「会动终端」的控制字节。保留 \t（展空格）、\r/\n（按用途
+# 转换），其余 C0（ESC/响铃/退格/清屏/DEL）、C1 全部剥除——cell_len 对它们
+# 宽 0 而终端会执行（ESC 引 CSI、\x0c 清屏、\x07 响铃、\x1b[2J 一键清屏）。
+# 2026-08-17 审计 F-01/F-06：粘贴带 ANSI 色的日志/教程、! ls --color 输出
+# 原样进帧区 = 转义注入（帧区 tio.write 是裸 os.write，无 rich 转义保护）。
+_C0_STRIP_RE = re.compile("[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]")
+
+
+def sanitize_display(text: str, keep_newlines: bool = False) -> str:
+    """终端显示净化（帧区写入与草稿插入共用）。
+
+    keep_newlines=False（显示路径）：剥 C0/C1，\\t→4 空格，\\r/\\n→空格——
+    帧行文本写出去不许触发回车/换行。keep_newlines=True（草稿路径）：
+    \\r(\\n)→\\n（多行草稿合法），其余同。
+    """
+    text = _C0_STRIP_RE.sub("", text)
+    text = text.replace("\t", "    ")
+    if keep_newlines:
+        text = text.replace("\r\n", "\n").replace("\r", "\n")
+    else:
+        text = text.replace("\r", " ").replace("\n", " ")
+    return text
+
 
 def _term_size() -> tuple[int, int]:
     try:
         sz = shutil.get_terminal_size(fallback=(80, 24))
-        return max(20, sz.columns), max(10, sz.lines)
+        # 只挡 0/负（假终端），不设 ≥20 假下限：真实窄终端（iTerm2 分屏
+        # <20 列）按假宽度排版会整体错位（2026-08-17 审计 F-07）
+        return max(1, sz.columns), max(1, sz.lines)
     except (OSError, ValueError):
         return 80, 24
 
@@ -53,8 +79,8 @@ class TermIO:
                  width: int | None = None, height: int | None = None) -> None:
         self._lock = threading.RLock()
         self.file = file if file is not None else sys.stdout
-        # 尺寸注入（测试/嵌入场景）：None = 每次现取真实终端
-        # （_term_size 有 ≥20 钳制，窄屏测试无法走 env，须显式注入）
+        # 尺寸注入（测试/嵌入场景）：None = 每次现取真实终端；窄屏测试
+        # 显式注入（env 路由不可靠）
         self._w, self._h = width, height
         try:
             self._fd = self.file.fileno()
@@ -139,7 +165,14 @@ class TermIO:
 
     def write(self, text: str) -> None:
         """帧区文本原语：在光标处写一段短文本（不换行），推进列坐标。
-        只用于 Frame 区域（行宽内截断好的文本），不做 wrap 处理。"""
+        只用于 Frame 区域（行宽内截断好的文本），不做 wrap 处理。
+
+        写入前统一净化（2026-08-17 审计 F-01/F-06）：帧区是裸 os.write，
+        rich 的转义保护覆盖不到——ESC/C0 若随面板/菜单/草稿文本进来，
+        会被原样发射（\\x1b[2J 清屏、SGR 泄漏、\\r 跳行覆写）。净化后
+        再算宽度：\\t→空格等换算进 cell_len，模型与终端一致。
+        """
+        text = sanitize_display(text)
         with self._lock:
             self._emit(text.encode("utf-8", "replace"))
             self._c += cell_len(text)
@@ -228,16 +261,44 @@ class TermIO:
         return max(1, n) if s.strip("\n") else n
 
     def _advance(self, buf: str) -> None:
-        """按渲染缓冲推进光标模型；区域底部换行触发滚动 → 钳制。"""
+        """按渲染缓冲推进光标模型：显式换行 + 终端自动折行感知。
+
+        buf 是 col 1 起算的渲染流（_measure_buf 产物，软折行按 col 1
+        边界插 \\n）。真实终端从当前光标写起：第一行只到宽度边界就自动
+        折行——流式「end=\"\" 两段续写」时旧实现直接把列相加（50+40=90）
+        → 模型认为还在第一行，真实终端早已折行 → 坐标永久分叉且
+        _sync_cursor 因「模型==错位坐标」不自愈（2026-08-17 审计 F-03）。
+
+        约定：恰好写满行宽时 _c = w+1（末列 pending-wrap，下一字符触发
+        折行）；跨段续写从实际列重放折行。
+        """
         if not buf:
             return
-        segs = buf.split("\n")
-        if buf.endswith("\n"):
-            self._r += len(segs) - 1
-            self._c = 1
-        else:
-            self._r += len(segs) - 1
-            self._c += cell_len(segs[-1])
+        w = self.width
+        for i, seg in enumerate(buf.split("\n")):
+            if i > 0:                     # 显式 \\n：换行即消 pending-wrap
+                self._r += 1
+                self._c = 1
+            L = cell_len(seg)
+            if not L:
+                continue
+            if self._c > w:               # 上段恰好写满：先折再写
+                self._r += 1
+                self._c = 1
+            rem = w - self._c + 1         # 本行剩余列数
+            if L > rem:
+                rest = L - rem
+                rows, extra = divmod(rest, w)
+                if extra:
+                    self._r += rows + 1
+                    self._c = extra + 1
+                else:
+                    self._r += rows
+                    self._c = w + 1       # 恰好写满末行
+            elif self._c + L - 1 == w:
+                self._c = w + 1           # 写满本行：pending-wrap
+            else:
+                self._c += L
         if self._region_bottom is not None and self._r > self._region_bottom:
             # 区域底部写满换行 → 区域滚动，光标留底
             self._r = self._region_bottom

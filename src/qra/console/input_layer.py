@@ -48,10 +48,11 @@ from typing import Any
 
 from qra.console.frame import Frame
 from qra.console.linebuffer import LineBuffer
-from qra.console.termio import TermIO
+from qra.console.termio import TermIO, sanitize_display
 
 _MENU_MAX_ITEMS = 12          # 面板最多显示条数（v1 无面板内滚动，诚实边界）
 _PASTE_CONFIRM_BYTES = 4096   # 大块粘贴确认阈值（与 detect_paste 同源）
+_PASTE_MAX_BYTES = 1_048_576  # 粘贴缓冲上限（无终结符时防内存无界，审计 F-05）
 
 
 def _char_width(c: str) -> int:
@@ -119,6 +120,7 @@ class InputLayer:
         # CSI 状态机 + 括号粘贴 + 粘贴突发回退
         self._esc: bytearray | None = None
         self._bracket = False        # 括号粘贴区间内（200~ … 201~）
+        self._paste_depth = 0        # 嵌套 200~/201~ 深度（内容内嵌序列按字面）
         self._paste_buf = bytearray()
         self._burst_pending = False  # 突发判据命中，回车时确认
         self._edit_pending = False   # 突发流内合并重绘：chunk 收尾统一 after_edit
@@ -237,14 +239,15 @@ class InputLayer:
             self._menu_close()
 
     def _insert_text(self, text: str) -> None:
-        """粘贴/注入统一入口：换行规范化 + 制表展开后逐字符插入。
+        """粘贴/注入统一入口：净化后逐字符插入。
 
         draft 不变量：可含 \\n（多行草稿，帧渲染换行感知）；绝不含
-        \\r/\\t——终端对二者执行回车/制表跳，而 cell_len 宽 0，宽度模型
-        失配 → 渲染错位（2026-08-17 雅宁实测「粘贴多行→第二行消失→
-        按键→终端全崩」的根因）。
+        \\r/\\t/ESC/C0——终端对它们执行回车/制表跳/转义注入，而 cell_len
+        宽 0，宽度模型失配 → 渲染错位（2026-08-17 雅宁实测「粘贴多行→
+        第二行消失→按键→终端全崩」的根因；同日审计 F-01：ESC/C0 随
+        粘贴进草稿 = 每键重绘向终端注入任意转义序列）。
         """
-        text = text.replace("\r\n", "\n").replace("\r", "\n").replace("\t", "    ")
+        text = sanitize_display(text, keep_newlines=True)
         for ch in text:
             self._buf.insert(ch)
         self._after_edit()
@@ -505,7 +508,7 @@ class InputLayer:
                 if b[0] not in b"[OP<":      # 非 CSI 引入符：Esc 键 + 普通键
                     self._esc = None
                     if self._bracket:        # 粘贴内容里的孤立 ESC：当内容存
-                        self._paste_buf.extend(b"\x1b" + b)
+                        self._paste_store(b"\x1b" + b)
                         return False
                     self._handle_plain(b"\x1b")
                     return self._handle_plain(b)
@@ -522,38 +525,53 @@ class InputLayer:
                 return False
             self._esc = None                 # 其余可打印：冲刷后按普通键处理
             if self._bracket:
-                self._paste_buf.extend(b"\x1b" + b)
+                self._paste_store(b"\x1b" + b)
                 return False
             return self._handle_plain(b)
         if self._bracket:
             if b == b"\x1b":                 # 可能是 201~ 结束序列的起点
                 self._esc = bytearray(b"\x1b")
                 return False
-            self._paste_buf.extend(b)
+            self._paste_store(b)
             return False
         if b == b"\x1b":
             self._esc = bytearray(b"\x1b")
             return False
         return self._handle_plain(b)
 
+    def _paste_store(self, data: bytes) -> None:
+        """粘贴缓冲追加（1MB 上限：粘贴内容无 201~ 终结符时防内存无界，
+        2026-08-17 审计 F-05）。"""
+        room = _PASTE_MAX_BYTES - len(self._paste_buf)
+        if room > 0:
+            self._paste_buf.extend(data[:room])
+
     def _dispatch_csi(self, seq: bytes) -> None:
-        if self._bracket:                     # 粘贴内容里带的转义序列：当内容存
-            if seq == b"\x1b[201~":
-                self._bracket = False
-                text = bytes(self._paste_buf).decode("utf-8", "replace")
-                self._paste_buf.clear()
-                if len(text.encode("utf-8", "replace")) >= _PASTE_CONFIRM_BYTES:
-                    self._insert_text(text)
-                    self._confirm_paste()
-                else:
-                    self._insert_text(text)
+        if self._bracket:                     # 粘贴内容里带的转义序列：按字面存
+            if seq == b"\x1b[200~":           # 嵌套开始：深度 +1，字面存
+                self._paste_depth += 1
+                self._paste_store(seq)
+            elif seq == b"\x1b[201~":
+                if self._paste_depth > 0:     # 嵌套结束：深度 -1，字面存
+                    self._paste_depth -= 1
+                    self._paste_store(seq)
+                else:                         # 顶层结束：粘贴终结
+                    self._bracket = False
+                    text = bytes(self._paste_buf).decode("utf-8", "replace")
+                    self._paste_buf.clear()
+                    if len(text.encode("utf-8", "replace")) >= _PASTE_CONFIRM_BYTES:
+                        self._insert_text(text)
+                        self._confirm_paste()
+                    else:
+                        self._insert_text(text)
             else:
-                self._paste_buf.extend(seq)
+                self._paste_store(seq)
             return
         if self._panel_key(seq):
             return                          # 面板聚焦：↑↓/← 等已消费
         if seq == b"\x1b[200~":               # 括号粘贴开始
             self._bracket = True
+            self._paste_depth = 0
             self._paste_buf.clear()
         elif seq == b"\x1b[A":                # ↑
             if self._menu is not None:

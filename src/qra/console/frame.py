@@ -24,6 +24,7 @@
 from __future__ import annotations
 
 import time
+import unicodedata
 from typing import Any, Callable
 
 from rich.cells import cell_len
@@ -31,27 +32,53 @@ from rich.cells import cell_len
 PANEL_MAX = 10  # 面板带最大行数（含标题行）
 
 
+def _iter_clusters(s: str) -> list[str]:
+    """字形簇迭代：基础字 + 组合符/VS/肤色修饰 + ZWJ 链整组。
+
+    cell_len 逐字符求和对 VS16 emoji 少算一半（❤️ 逐字符和 1 vs 终端
+    2 列）、对 ZWJ 序列多算 4 倍（👨‍👩‍👧‍👦 逐字符和 8 vs 终端 2 列）
+    ——逐字符度量会破坏行宽不变量/切碎字形（2026-08-17 审计 F-02/F-12）。
+    按簇取整串 cell_len 与终端一致。布局/截断/列映射必须同一度量。
+    """
+    out: list[str] = []
+    n = len(s)
+    i = 0
+    while i < n:
+        buf = s[i]
+        i += 1
+        while i < n and (buf[-1] == "\u200d" or s[i] == "\u200d"):
+            buf += s[i]               # ZWJ 链：emoji 家族
+            i += 1
+        while i < n and (unicodedata.combining(s[i])
+                         or s[i] in "\ufe0e\ufe0f"
+                         or "\U0001F3FB" <= s[i] <= "\U0001F3FF"):
+            buf += s[i]               # 组合符 / 变体选择 / 肤色修饰
+            i += 1
+        out.append(buf)
+    return out
+
+
 def _slice_disp(s: str, start: int, end: int) -> str:
-    """按显示宽度切片（CJK 宽字符感知）。
+    """按显示宽度切片（字形簇感知，CJK 宽字符/emoji 整组）。
 
     整字纪律：起点越过 start 的宽字符收进本行（终端折行语义——该字
     放不下上一行，整字折到本行渲染），不得丢字；终点越过 end 的停
     （不可拆）。现役调用方：活动条/面板/菜单文本截断（start=0）。
     _prompt_layout 已改为单遍扫描，不再走本函数。
     2026-08-17 修复：原版把「起点跨界」的字整字跳过 → 行文本与
-    (s,e) 光标/点击映射不一致。
+    (s,e) 光标/点击映射不一致。审计后按字形簇迭代（ZWJ 家族不切碎）。
     """
     out: list[str] = []
     pos = 0
-    for ch in s:
-        w = cell_len(ch)
+    for cl in _iter_clusters(s):
+        w = cell_len(cl)
         if pos >= end:
             break
         if pos + w <= start:
             pos += w
             continue
         if pos + w <= end:
-            out.append(ch)
+            out.append(cl)
         else:
             break   # 跨 end 整字不可拆
         pos += w
@@ -65,12 +92,14 @@ def _pad_disp(s: str, width: int) -> str:
 
 def _char_at_disp(s: str, col: int) -> int:
     """显示列 → 字符下标：返回第一个「终点越过 col」的字符下标
-    （与 input_layer._pos_at_display_col 同语义，此处用 cell_len 宽度）。"""
+    （字形簇度量，与 _place_input_cursor 的整串 cell_len 一致）。"""
     width = 0
-    for i, ch in enumerate(s):
-        if width + cell_len(ch) > col:
-            return i
-        width += cell_len(ch)
+    off = 0
+    for cl in _iter_clusters(s):
+        if width + cell_len(cl) > col:
+            return off
+        width += cell_len(cl)
+        off += len(cl)
     return len(s)
 
 
@@ -129,17 +158,19 @@ class Frame:
             buf: list[str] = []
             c = 0           # 当前行累计显示宽
             row_s = pos     # 当前行 full 起点
-            for k, ch in enumerate(seg):
-                cw = cell_len(ch)
+            off = 0         # 段内字符偏移（簇跨多字符，(s,e) 按字符下标）
+            for cl in _iter_clusters(seg):
+                cw = cell_len(cl)
                 if c + cw > w and buf:
-                    # 满行且下一字放不下：切行，宽字符整字带到下一行
-                    rows.append(("".join(buf), row_s, pos + k))
-                    buf = [ch]
+                    # 满行且下一簇放不下：切行，整簇带到下一行
+                    rows.append(("".join(buf), row_s, pos + off))
+                    buf = [cl]
                     c = cw
-                    row_s = pos + k
+                    row_s = pos + off
                 else:
-                    buf.append(ch)
+                    buf.append(cl)
                     c += cw
+                off += len(cl)
             rows.append(("".join(buf), row_s, pos + len(seg)))
             pos += len(seg) + 1  # +1 跳过 \n 本身
         if not rows:

@@ -65,6 +65,38 @@ class _Base(unittest.TestCase):
         self.assertEqual(il.draft(), expect)
 
 
+class NestedPasteTests(_Base):
+    """审计 F-05：粘贴内容内嵌 200~/201~ 按字面处理（嵌套深度计数），
+    只在顶层 201~ 终结；缓冲 1MB 上限。旧实现：内容里第一个 201~ 就
+    提前终结 → 剩余字节当按键执行（内嵌 \\r 直接提交草稿）。"""
+
+    def _raw_layer(self) -> InputLayer:
+        il = InputLayer(TurnState(True), tio=self._tio)
+        return il   # 不 start、不入 _layers：无读线程可关闭，直接驱动 CSI 状态机
+
+    def test_nested_200_201_stored_literally(self):
+        il = self._raw_layer()
+        il._dispatch_csi(b"\x1b[200~")           # 顶层开始
+        self.assertTrue(il._bracket)
+        il._dispatch_csi(b"\x1b[200~")           # 嵌套开始：按字面存
+        self.assertEqual(il._paste_depth, 1)
+        self.assertIn(b"\x1b[200~", bytes(il._paste_buf))
+        il._paste_store(b"abc")
+        il._dispatch_csi(b"\x1b[201~")           # 嵌套结束：不终结
+        self.assertTrue(il._bracket)
+        self.assertEqual(il._paste_depth, 0)
+        self.assertIn(b"\x1b[201~", bytes(il._paste_buf))
+        il._dispatch_csi(b"\x1b[201~")           # 顶层结束：终结 + 入草稿
+        self.assertFalse(il._bracket)
+        # ESC 经 sanitize 剥离，可打印部分保留
+        self.assertEqual(il._buf.text, "[200~abc[201~")
+
+    def test_paste_store_caps_at_one_mb(self):
+        il = self._raw_layer()
+        il._paste_store(b"x" * (2 * 1024 * 1024))
+        self.assertLessEqual(len(il._paste_buf), 1_048_576)
+
+
 class CursorEditTests(_Base):
     def test_left_right_move(self):
         il = self._layer()

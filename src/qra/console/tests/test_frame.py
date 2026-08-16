@@ -408,6 +408,45 @@ class MultilineFrameTests(_Env):
         self.assertEqual(screen.line(top2 - 1), "")   # 旧行被区域扩张擦除
         self.assertEqual(screen.line(top2 + 1), "")
 
+    def test_vs16_emoji_wraps_at_true_width(self):
+        """VS16 emoji（❤️）整串 2 列：布局按真宽折行，不按逐字符和。
+
+        审计 F-02：逐字符和把 10 列算成 5 列 → 超宽行 → 真终端二次
+        折行（与 2026-08-17 已修崩溃同源）。
+        """
+        screen, tio, r, fr = _setup(width=8, height=24)
+        hearts = "❤️" * 5
+        fr.input_changed(hearts, len(hearts))
+        layout = fr._prompt_layout()
+        self.assertEqual(len(layout), 2)          # 10 列 ÷ 8 = 2 行
+        for text, _s, _e in layout:
+            self.assertLessEqual(cell_len(text), 8)   # 不变量①
+        joined = "".join(t for t, _, _ in layout)
+        self.assertEqual(joined.count("❤️"), 5)      # 整簇不拆不丢
+
+    def test_zwj_family_wraps_whole_cluster(self):
+        """ZWJ 家族 2 列/簇：逐字符和 8 会过早折行且切碎字形（审计 F-12）。"""
+        fam = "👨‍👩‍👧‍👦"
+        screen, tio, r, fr = _setup(width=4, height=24)
+        fr.input_changed(fam * 3, len(fam * 3))
+        layout = fr._prompt_layout()
+        self.assertEqual(len(layout), 2)          # 6 列 ÷ 4 = 2 行
+        for i, (text, _s, _e) in enumerate(layout):
+            self.assertLessEqual(cell_len(text), 4)
+            body = text[len("❯ "):] if i == 0 else text   # 首行含提示符
+            self.assertEqual(len(body) % len(fam), 0)     # 每行=完整家族
+        joined = "".join(t for t, _, _ in layout)
+        self.assertEqual(joined.count(fam), 3)
+
+    def test_cursor_col_consistent_with_cluster_layout(self):
+        """光标列（整串 cell_len）与簇布局一致：VS16 后光标不漂移（F-02）。"""
+        screen, tio, r, fr = _setup(width=80, height=24)
+        fr.present()                              # region_bottom=23，提示符钉 24
+        draft = "❤️" * 3
+        fr.input_changed(draft, len(draft))
+        # ❯(2 列) + 3×❤️(6 列) = 8 列 → 光标落 col 9；屏坐标 (24, 9)
+        self.assertEqual(tio.cursor_pos, (24, 9))
+
     def test_click_to_draft_maps_rows_and_cols(self):
         _, _, _, fr = _setup(80, 24)
         fr.input_changed("ab\ncd", 5)
