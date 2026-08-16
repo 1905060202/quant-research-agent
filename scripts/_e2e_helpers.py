@@ -276,6 +276,17 @@ def run_console_raw(root: str) -> bool:
         ok = False
     os.write(fd, b"\x7f" * 5)                        # 清草稿
     drain(2)
+    # v4 固定输入框：Tab 开面板（活动输出区）→ Esc 关回输入框 → 再开。
+    # pty 输出是累积的，用计数证明第二次 Tab 真的重绘了面板。
+    ok &= send_and_wait(b"\t", "▸ 本轮活动")         # Tab：面板弹出（标题行）
+    n_panel = _strip_ansi(out).count("▸ 本轮活动")
+    ok &= send_and_wait(b"\x1b", "❯ ")               # Esc：关闭面板
+    ok &= send_and_wait(b"\t", "▸ 本轮活动")         # 再开
+    if _strip_ansi(out).count("▸ 本轮活动") != n_panel + 1:
+        print("  ✗ Tab 二次弹出未重绘面板")
+        ok = False
+    os.write(fd, b"\x1b")                            # 关面板
+    drain(1)
     ok &= send_and_wait(b"\x03", "^C")               # Ctrl+C 恢复（不退出）
     os.write(fd, b"\n")                              # 空行退出
     deadline = time.time() + 120

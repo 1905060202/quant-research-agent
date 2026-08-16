@@ -59,13 +59,14 @@ class CommandContext:
     agent: object
     db: object
     sess: SessionState
-    console: object          # rich.Console
+    console: object          # 内容区 Console 薄包装（D011 v4：print→renderer.append_line）
     inp: object              # InputLayer
     events: object           # queue.Queue
     plain: bool
     pending: dict = field(default_factory=dict)   # {"resume": [listing rows]}
     loop_prompt: str | None = None   # /loop 待启动的自动继续 prompt（主循环消费）
     renderer: object | None = None   # TurnRenderer（D011：/fold 折叠管理）
+    shell_jobs: list = field(default_factory=list)  # ! 后台作业（D011 v4 面板内容源）
 
 
 class ConsoleHistory:

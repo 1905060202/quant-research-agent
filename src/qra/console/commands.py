@@ -11,8 +11,13 @@ console 自有行编辑不能复用它）。分流顺序：
 from __future__ import annotations
 
 import os
+import threading
+import time
 from dataclasses import dataclass, field
 from typing import Callable
+
+# 面板 ring buffer 上限（行）：超出丢最旧（诚实边界：不无限吃内存）
+_SHELL_RING_MAX = 2000
 
 
 @dataclass(frozen=True)
@@ -104,11 +109,40 @@ def complete(draft: str) -> str | None:
     return "/" + lcp if len(lcp) > len(want) else None
 
 
-def _run_bang(ctx, command: str) -> None:
-    """! 直达：与 terminal 工具同门同黑名单；输出只上终端不进上下文。
+@dataclass
+class ShellJob:
+    """! 后台 shell 作业：线程写 ring buffer，面板流式读，完成注入哨兵。
 
-    审批回调 TLS 只认主线程（tool_executor 每 turn 新建线程），dispatch 在主
-    线程跑所以装得上。yolo 开时 check_bang_approval 自动放行。
+    done/rc 由工作线程置位；lines 为环形缓冲（超限丢最旧——诚实边界）。
+    """
+
+    command: str
+    lines: list[str] = field(default_factory=list)
+    rc: int | None = None
+    done: bool = False
+    started: float = field(default_factory=time.time)
+    lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
+
+    def append(self, line: str) -> None:
+        with self.lock:
+            self.lines.append(line.rstrip("\n"))
+            if len(self.lines) > _SHELL_RING_MAX:
+                del self.lines[: len(self.lines) - _SHELL_RING_MAX]
+
+    def tail(self, n: int) -> list[str]:
+        with self.lock:
+            return list(self.lines[-n:])
+
+
+def _run_bang(ctx, command: str) -> None:
+    """! 直达：与 terminal 工具同门同黑名单；输出只上终端不进模型上下文。
+
+    v4：后台线程跑（CC 对齐——shell 运行时输入框照常可用），输出进
+    ShellJob ring buffer（面板 Tab 查看），完成时内容区一行摘要 +
+    ("shell_done", job) 哨兵注入输入队列。审批仍在主线程先做（TLS 只
+    认主线程，tool_executor 每 turn 新建线程）；yolo 开时自动放行。
+
+    plain 模式（管道/非 tty）保持旧同步行为：逐行直印 stdout。
     """
     from hermes_cli.bang_shell import check_bang_approval, resolve_bang_cwd, run_bang_command
     from tools.terminal_tool import set_approval_callback
@@ -131,15 +165,38 @@ def _run_bang(ctx, command: str) -> None:
     except Exception:
         pass
 
-    def _writer(line: str) -> None:
-        if ctx.plain:
+    if ctx.plain:
+        def _writer(line: str) -> None:
             print(line)
-        else:
-            ctx.console.print(line, highlight=False)
+        rc = run_bang_command(command, cwd=cwd, writer=_writer)
+        if rc != 0:
+            _say(ctx, f"  ! 退出码 {rc}")
+        return
 
-    rc = run_bang_command(command, cwd=cwd, writer=_writer)
-    if rc != 0:
-        _say(ctx, f"  ! 退出码 {rc}")
+    job = ShellJob(command)
+    try:
+        ctx.shell_jobs.append(job)
+    except AttributeError:
+        pass
+
+    def _worker() -> None:
+        def _writer(line: str) -> None:
+            job.append(line)
+        try:
+            rc = run_bang_command(command, cwd=cwd, writer=_writer)
+        except Exception:
+            rc = 1
+        with job.lock:
+            job.rc = rc
+            job.done = True
+        try:
+            ctx.inp.inject(("shell_done", job))
+        except Exception:
+            pass
+
+    threading.Thread(target=_worker, daemon=True,
+                     name=f"qra-shell-{job.started:.0f}").start()
+    _say(ctx, f"  ⏵ 后台运行（Tab 查看输出）: {command}")
 
 
 def _say(ctx, text: str) -> None:

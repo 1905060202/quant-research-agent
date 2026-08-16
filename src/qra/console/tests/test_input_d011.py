@@ -1,5 +1,5 @@
 """InputLayer D011 v2 原始字节测试：光标编辑 / 斜杠菜单 / 括号粘贴 /
-SGR 鼠标 / 回合静音回显（2026-08-16 崩溃修复 + 光标 P0）。
+SGR 鼠标 / 回合实时回显（2026-08-16 崩溃修复 + 光标 P0 + v4 帧）。
 
 与旧 test_inputlayer.py 的差异：这里给 InputLayer 传显式
 TermIO(file=StringIO)，断言输出字节（回显协议），旧文件只断言草稿态。
@@ -162,15 +162,18 @@ class BracketPasteTests(_Base):
         self.assertGreaterEqual(out.count("a"), 1)
 
 
-class BusySilenceTests(_Base):
-    def test_busy_typing_silent_until_redraw(self):
+class BusyBehaviorTests(_Base):
+    def test_busy_typing_echoes_live(self):
+        """v4：单一写入者 + 整序列原子绘制后，busy 打字实时回显（CC 对齐）。
+
+        旧 D011 的「回显静音、结束补画」随 spinner 一起退役——帧绘制
+        save/restore 光标，与流式渲染互不踩踏。
+        """
         il = self._layer()
         il.set_busy(True)                         # 回合中
         os.write(self.w, b"quiet")
         self._wait_draft(il, "quiet")
-        self.assertNotIn("quiet", self._out.getvalue())   # 回显静音
-        il.set_busy(False)
-        self.assertIn("quiet", self._out.getvalue())     # 结束补画
+        self.assertIn("quiet", self._out.getvalue())   # 实时回显（提示符带）
 
     def test_sgr_click_goes_to_sink_when_busy(self):
         il = self._layer()

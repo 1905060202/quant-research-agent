@@ -142,23 +142,35 @@ class StreamingDeferTests(unittest.TestCase):
         r.finish(None, "test-model")
         self.assertIn("BODY-7", buf.getvalue())   # finish 统一重印
 
-    def test_spinner_suppressed_during_streaming(self):
+    def test_activity_none_during_streaming(self):
+        """v4：spinner 退役 → 活动标注内容源。流式期无标注（内容即反馈）。"""
         buf, tio, state, r = _setup()
         r.begin()
         r.text_delta("abc")
-        n0 = len(buf.getvalue())
-        r.tick()
-        self.assertEqual(len(buf.getvalue()), n0)   # 流式期无 spinner
+        self.assertIsNone(r.activity())
 
-    def test_spinner_idle_only(self):
+    def test_activity_thinking_when_idle(self):
+        """v4：等待首 token 的空闲期 → ("thinking", …)（Frame 活动条绘制）。"""
         buf, tio, state, r = _setup()
         r.begin()
         r._last_content_at = time.time() - 1   # 越过 0.3s 空闲门
-        r.tick()
-        r.tick()
-        out = buf.getvalue()
-        self.assertIn("\r", out)        # spinner 原地刷新
-        self.assertIn("思考中", out)
+        act = r.activity()
+        self.assertIsNotNone(act)
+        self.assertEqual(act[0], "thinking")
+
+    def test_activity_tool_while_running(self):
+        """v4：工具执行中 → ("tool", name, started)。"""
+        buf, tio, state, r = _setup()
+        r.begin()
+        r.tool_start("tc1", "qra_quote", {})
+        act = r.activity()
+        self.assertEqual(act[0], "tool")
+        self.assertEqual(act[1], "qra_quote")
+
+    def test_activity_none_when_idle_session(self):
+        """v4：非回合期无任何活动标注。"""
+        buf, tio, state, r = _setup()
+        self.assertIsNone(r.activity())
 
 
 class GateMarkerTests(unittest.TestCase):

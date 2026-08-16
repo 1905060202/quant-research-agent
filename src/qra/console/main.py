@@ -16,13 +16,16 @@ P0 命令面（CC/prime/hermes 原生功能对齐，2026-08-16）：
   - ←→/Home/End 光标编辑 + 鼠标点击定位光标（LineBuffer 行编辑，D011 v2 P0）
   - /loop 自动继续（CC 对齐，进程内调度器：每轮自动同 prompt 重跑，Ctrl+C 退出）
 
-D011 追加式渲染（2026-08-16 雅宁实测修复）：
+D011 v4 固定输入框帧（2026-08-17，CC 对齐）：
+  - DECSTBM 滚动区域：内容在 [1..R] 内自然滚动，输入框钉在屏底 [R+1..H]
+    永不滚动。帧内四带自上而下：提示符带（busy 反显 = CC 式输入框）
+    → 菜单带（/ 候选面板）→ 活动条带（shell/工具/子代理/思考运行中
+    标注 + 计时）→ 面板带（Tab 切入看 shell 输出，←/Esc 返回）
   - 已定型内容只 print 一次（自然滚动 + 消灭 rich Live 全帧重绘的重复输出）
-  - spinner 呼吸反馈：等首 token / 工具执行中一行原地心跳
-  - 单一写入者 TermIO：渲染帧 / spinner / 输入回显 / 菜单 / 提示符全部串行
-    经同一把锁写出——「输出时打字终端崩」根因修复（两个不同步 tty 写入者
-    的字节插进转义序列中间，终端模拟器 CSI 状态机卡死）
-  - 回合中输入回显静音，按键进 LineBuffer 缓冲，回合结束一次补画
+  - 单一写入者 TermIO + 光标追踪 + 整序列原子绘制（tio.locked）——
+    「输出时打字终端崩」根因修复；busy 中打字实时回显（CC 对齐）
+  - 帧高开合纪律：变高不滚内容（底部行被帧覆盖，记恢复判据）；变矮
+    清释放行，offset 未变则按行精确重印被覆盖内容（诚实降级不印错位）
 
 架构（零 vendor 改动）：
   导入 run_agent.AIAgent（hermes 根模块公开类，oneshot/tui_gateway 同款先例），
@@ -46,6 +49,7 @@ import threading
 import time
 
 from rich.console import Console
+from rich.text import Text
 
 # 入口自举：脚本入口是 `python -m src.qra.console.main`（包根在 CWD），
 # qra.* 顶层导入需要 src/ 在 sys.path 上。vendor 顶层模块靠 editable 安装
@@ -57,6 +61,7 @@ if _src_root not in sys.path:
 
 # InputLayer/_char_width/detect_paste 从 input_layer.py 迁出后 re-export：
 # test_inputlayer.py 依赖 qra.console.main 此路径（门禁兼容，不破不改）
+from qra.console.frame import Frame
 from qra.console.input_layer import InputLayer, _char_width, detect_paste  # noqa: F401
 from qra.console.renderer import TurnRenderer
 from qra.console.termio import TermIO
@@ -203,8 +208,8 @@ def apply(state: TurnState, ev, renderer: TurnRenderer) -> None:
 # ---------------------------------------------------------------- 渲染循环
 
 def _render_loop(events: "queue.Queue", state: TurnState,
-                 renderer: TurnRenderer) -> None:
-    """消费事件并增量渲染；空闲心跳驱动 spinner（呼吸反馈）。
+                 renderer: TurnRenderer, frame=None) -> None:
+    """消费事件并增量渲染；空闲心跳驱动 Frame 活动条/面板（D011 v4）。
 
     事件到达时间戳 trace（QRA_EVENT_TRACE=1 时写 /tmp/qra_event_trace.txt，
     诊断流式节奏用：判断上游是逐 delta 实时到达还是攒批一次性到达）。
@@ -215,7 +220,8 @@ def _render_loop(events: "queue.Queue", state: TurnState,
         try:
             ev = events.get(timeout=0.1)
         except queue.Empty:
-            renderer.tick()
+            if frame is not None:
+                frame.tick()
             continue
         if ev[0] == "sentinel":
             break
@@ -243,9 +249,10 @@ def _render_loop(events: "queue.Queue", state: TurnState,
         if ev[0] == "sentinel":
             break
         try:
-            renderer.tick()
+            if frame is not None:
+                frame.tick()
         except Exception:
-            logging.exception("console render tick failed")
+            logging.exception("console frame tick failed")
     if trace is not None:
         try:
             with open("/tmp/qra_event_trace.txt", "w", encoding="utf-8") as f:
@@ -426,8 +433,12 @@ def cleanup(agent, session_db) -> None:
 
 def run_turn(agent, session_db, events, state, prompt: str,
              conversation_history, tio: TermIO, renderer: TurnRenderer,
-             plain: bool) -> dict:
-    """执行一轮：追加式渲染 + 回调采集；plain 模式不渲染只回结果。"""
+             plain: bool, frame=None) -> dict:
+    """执行一轮：追加式渲染 + 回调采集；plain 模式不渲染只回结果。
+
+    frame：交互模式的固定输入框（渲染线程空闲心跳驱动其活动条/面板）；
+    -z/plain 传 None 跳过。
+    """
     logging.disable(logging.CRITICAL)  # 静默 stdlib logger（文件 handler 不受影响）
 
     if plain:
@@ -443,7 +454,7 @@ def run_turn(agent, session_db, events, state, prompt: str,
     state.model = getattr(agent, "model", "") or ""
     renderer.begin()
     render_thread = threading.Thread(
-        target=_render_loop, args=(events, state, renderer),
+        target=_render_loop, args=(events, state, renderer, frame),
         daemon=True, name="qra-console-render")
     render_thread.start()
 
@@ -471,12 +482,13 @@ def run_turn(agent, session_db, events, state, prompt: str,
 
     captured_err = buf_err.getvalue().strip()
     if captured_err:
-        tio.print("stderr 捕获：" + captured_err[-2000:], style="red")
+        # 走 append_line 进内容区记账（直接 tio.print 会绕过行账本）
+        renderer.append_line("stderr 捕获：" + captured_err[-2000:], style="red")
 
     if failure is not None:
         if isinstance(failure, (KeyboardInterrupt, SystemExit)):
             raise failure
-        tio.print(f"agent 失败：{failure}", style="bold red")
+        renderer.append_line(f"agent 失败：{failure}", style="bold red")
         return {"final_response": "", "failed": True}
 
     return result
@@ -503,6 +515,26 @@ def parse_args(argv=None) -> argparse.Namespace:
     return p.parse_args(argv)
 
 
+class _ContentConsole:
+    """命令输出 Console 薄包装：print → renderer.append_line。
+
+    handlers/commands 全部经 ctx.console.print 输出（/help 表格、/status
+    Panel 等）；有固定帧后直接写 tty 会绕过渲染账本（光标模型与折叠
+    行号漂移），必须进内容区记账（D011 v4）。
+    """
+
+    def __init__(self, renderer: TurnRenderer) -> None:
+        self._renderer = renderer
+
+    @property
+    def width(self) -> int:
+        return self._renderer._tio.width
+
+    def print(self, *objs, **kw) -> None:
+        for obj in objs:
+            self._renderer.append_line(obj, **kw)
+
+
 def main(argv=None) -> int:
     args = parse_args(argv)
     if args.plain or not sys.stdout.isatty():
@@ -519,8 +551,11 @@ def main(argv=None) -> int:
     try:
         agent, session_db, events, state, sess = build_agent(args)
         renderer = TurnRenderer(tio, state)
-        # 命令输出 console 绑定 TermIO 的 file（与渲染同 fd，串行）
-        console = Console(file=tio.file, force_terminal=True, width=tio.width)
+        # 命令输出 console 绑定渲染账本：handlers 的 print 全部进内容区
+        # （直接写 tty 会绕过光标模型与折叠行号，D011 v4）
+        console = _ContentConsole(renderer)
+        # 固定输入框帧：仅多轮交互分支创建接线（-z/plain 为 None）
+        frame = None
 
         def one_turn(prompt: str) -> dict:
             # 自动标题（每会话只试一次；set_auto_title_if_empty 幂等兜底）
@@ -538,7 +573,7 @@ def main(argv=None) -> int:
             state.text_open = False
             state.has_text = False
             result = run_turn(agent, session_db, events, state, prompt,
-                              sess.history, tio, renderer, args.plain)
+                              sess.history, tio, renderer, args.plain, frame)
             final = result.get("final_response") or ""
             sess.history.append({"role": "user", "content": prompt})
             sess.history.append({"role": "assistant", "content": final})
@@ -561,24 +596,26 @@ def main(argv=None) -> int:
             except ValueError:
                 interval = 60.0
             label = prompt[:40] + "…" if len(prompt) > 40 else prompt
-            tio.print(f"⟳ /loop 模式：每 {interval:.0f}s 自动继续「{label}」",
-                      style="bold cyan")
-            tio.print("Ctrl+C 退出循环回到提示符", style="dim")
+            renderer.append_line(
+                f"⟳ /loop 模式：每 {interval:.0f}s 自动继续「{label}」",
+                style="bold cyan")
+            renderer.append_line("Ctrl+C 退出循环回到提示符", style="dim")
             n = 0
-            inp.set_busy(True)   # 整个循环静音输入回显
+            inp.set_busy(True)   # 整个循环：提示符带反显（v4 实时回显）
             try:
                 while True:
                     n += 1
-                    tio.print(f"⟳ 第 {n} 轮", style="bold cyan")
+                    renderer.append_line(f"⟳ 第 {n} 轮", style="bold cyan")
                     try:
                         one_turn(prompt)
                     except KeyboardInterrupt:
-                        tio.print("(中断本轮，退出循环)", style="yellow")
+                        renderer.append_line("(中断本轮，退出循环)",
+                                             style="yellow")
                         return
                     try:
                         time.sleep(interval)
                     except KeyboardInterrupt:
-                        tio.print("(退出循环)", style="yellow")
+                        renderer.append_line("(退出循环)", style="yellow")
                         return
             finally:
                 inp.set_busy(False)
@@ -595,25 +632,52 @@ def main(argv=None) -> int:
                 return 1
             return 0
 
-        # 多轮交互：会话级输入层（回合中打字不丢失、静音缓冲、结束补画）
-        tio.print("quant-agent · 量化研究智能体", style="bold cyan")
-        tio.print("prime 式 CoT 全展示 · /help 看命令 · ! 直达 shell · "
-                  "Ctrl+T 折叠思考 · /mouse on 开点击展开 · 空行退出", style="dim")
+        # 多轮交互：会话级输入层 + 固定输入框帧（D011 v4：输入框钉屏底，
+        # 活动条标注 + Tab 面板，CC 对齐）
+        frame = Frame(tio, prompt="❯ ")
+        frame.offset_provider = renderer.offset
+        frame.restore_cb = renderer.reprint_abs
+        frame.rows_provider = lambda: renderer._row
+        renderer.append_line("quant-agent · 量化研究智能体", style="bold cyan")
+        renderer.append_line("prime 式 CoT 全展示 · /help 看命令 · ! 直达 shell · "
+                             "Ctrl+T 折叠思考 · /mouse on 开点击展开 · "
+                             "Tab 看面板 · ←/Esc 返回 · 空行退出", style="dim")
         from qra.console import commands
         from qra.console.session_state import CommandContext, ConsoleHistory
 
         inp = InputLayer(state, history=ConsoleHistory(),
                          completer=commands.complete, prompt="❯ ",
-                         tio=tio, menu_provider=commands.menu_items)
+                         tio=tio, menu_provider=commands.menu_items,
+                         frame=frame)
         inp.set_event_sink(events.put)   # 回合中鼠标点击/Ctrl+T 直达渲染线程
         ctx = CommandContext(agent=agent, db=session_db, sess=sess,
                              console=console, inp=inp, events=events,
                              plain=args.plain, renderer=renderer)
+
+        # 活动条/面板内容源：运行中的 shell 作业优先；无作业回退本轮
+        # 活动（state.statuses）与渲染器状态（工具/思考）
+        def _activity_now():
+            for job in reversed(ctx.shell_jobs):
+                if not job.done:
+                    return ("shell", job.command[:40], job.started)
+            return renderer.activity()
+
+        def _panel_now():
+            jobs = ctx.shell_jobs
+            if jobs:
+                job = next((j for j in reversed(jobs) if not j.done), jobs[-1])
+                title = f"! {job.command}"
+                if not job.done:
+                    title += "（运行中）"
+                return title, job.tail(9) or ["（尚无输出…）"]
+            return "本轮活动", state.statuses[-9:] or ["（暂无活动输出…）"]
+
+        frame.activity_provider = _activity_now
+        frame.panel_provider = _panel_now
         inp.start()
         try:
             while True:
-                inp.set_content_rows(renderer._row)   # 点击定位基准
-                inp.redraw()   # 提示符 + 草稿 + 光标定位（回合中静音的补画点）
+                inp.redraw()   # 提示符 + 草稿 + 光标定位（帧区域同步点）
                 if state.dirty:   # 提示符阶段 Ctrl+T：翻折叠 + 区域重印 + 光标复位
                     state.dirty = False
                     renderer.toggle_thinking()
@@ -621,17 +685,34 @@ def main(argv=None) -> int:
                 try:
                     user_input = inp.pop()
                 except EOFError:
-                    tio.print()
                     break
                 except KeyboardInterrupt:
-                    tio.print("^C", style="yellow")
+                    renderer.append_line("^C", style="yellow")
+                    continue
+                # 非行项：点击折叠 / ! shell 完成哨兵（D011 v4 帧交互）
+                if isinstance(user_input, tuple):
+                    kind = user_input[0]
+                    if kind == "click":
+                        _, cy, cx = user_input
+                        renderer.click(cy, cx)
+                        inp.redraw()
+                    elif kind == "shell_done":
+                        _, job = user_input
+                        mark = "✓" if job.rc == 0 else f"✗ rc={job.rc}"
+                        style = "green" if job.rc == 0 else "red"
+                        renderer.append_line(
+                            Text(f"⏺ ! {job.command} 完成 · {mark} · "
+                                 f"用时 {time.time() - job.started:.0f}s",
+                                 style=style))
                     continue
                 if not user_input.strip():
                     break
                 line = user_input.strip()
+                # 输入行回显进内容区（帧原位清草稿后补 transcript，CC 对齐）
+                renderer.append_line(Text(f"❯ {line}", style="bold cyan"))
                 # /resume 待选号模式：纯数字行直接恢复对应会话
                 if commands.maybe_pending(ctx, line):
-                    tio.print()
+                    renderer.append_line()
                     continue
                 # 分流：! 直达 → / 命令 → 普通 prompt
                 if commands.dispatch(ctx, line) == "prompt":
@@ -639,11 +720,12 @@ def main(argv=None) -> int:
                     try:
                         one_turn(line)
                     except KeyboardInterrupt:
-                        tio.print("(中断本轮)", style="yellow")
+                        renderer.append_line("(中断本轮)", style="yellow")
                     except Exception as exc:
                         # 任何意外都不能炸死交互循环（终端 raw 模式残留 =
                         # 「戳了错误之后无法运行」）——打印后继续收输入
-                        tio.print(f"⚠ 本轮异常：{exc}", style="bold red")
+                        renderer.append_line(f"⚠ 本轮异常：{exc}",
+                                             style="bold red")
                         _log_turn_error(exc)
                     finally:
                         inp.set_busy(False)
@@ -652,7 +734,7 @@ def main(argv=None) -> int:
                     pending_prompt = ctx.loop_prompt
                     ctx.loop_prompt = None
                     loop_mode(pending_prompt)
-                tio.print()
+                renderer.append_line()
         finally:
             inp.close()
         return 0
