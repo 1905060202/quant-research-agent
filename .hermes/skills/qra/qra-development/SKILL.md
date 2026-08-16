@@ -88,6 +88,8 @@ metadata:
    （快照字节上限，默认 256MiB）、QRA_PY_DEBOUNCE / QRA_PY_MIN_INTERVAL（快照节流，默认 15/30）、
    QRA_PY_TICK（后台 tick，默认 5）。
 
+10. **开源隐私边界（2026-08-17 仓库已开源）**：QRA 已开源（github.com/1905060202/quant-research-agent，public+MIT），`kb_sources/`、`docs/`、`src/` 都是 git 跟踪路径，写进去即公开。路由规则：①个人隐私（八字/财务明细/持仓金额/亲密关系/性心理/电话/邮箱/微信号）只准进 `.hermes/memories/`（.gitignore 保护，永不入库）；②写进 `kb_sources/` 的工作知识必须先脱敏（电话/邮箱/微信号/API key → 占位符）；③三家记忆（prime `~/.prime/agent/harness/harness_state.json`、claude `~/.claude/projects/-Users-huyaning/memory/`、hermes `.hermes/memories/`）迁移已分层：协作铁律→契约(qra_memory.db)、画像→USER.md + 用户画像完整版.md（本地隐私）、工作知识→kb_sources（脱敏）、任务状态/历史快照→不迁。
+
 ## 权威文档指针（先读这些，再动手）
 
 - `HANDOFF_新session必读.md` —— 新 session 第一件事读它，再读 `docs/README.md`。
