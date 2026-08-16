@@ -152,5 +152,29 @@ class DispatchTests(unittest.TestCase):
         self.assertEqual(commands.dispatch(self._ctx(), "! echo DISPATCH_OK"), "bang")
 
 
+class LoopCommandTests(unittest.TestCase):
+    """/loop（CC 对齐自动继续）：空参只讲用法（离线），有参置位消费点。"""
+
+    def _ctx(self):
+        from qra.console.session_state import CommandContext
+        return CommandContext(agent=None, db=None, sess=None,
+                              console=DispatchTests._FakeConsole(),
+                              inp=None, events=None, plain=False)
+
+    def test_parse_loop_is_command(self):
+        self.assertEqual(commands.parse_input("/loop 每天跑一遍日报"),
+                         ("command", "loop", "每天跑一遍日报"))
+
+    def test_bare_loop_shows_usage_without_setting(self):
+        ctx = self._ctx()
+        self.assertEqual(commands.dispatch(ctx, "/loop"), "command")
+        self.assertIsNone(ctx.loop_prompt, "空参不得触发循环")
+
+    def test_loop_with_prompt_sets_pending(self):
+        ctx = self._ctx()
+        self.assertEqual(commands.dispatch(ctx, "/loop 复盘今天的行情"), "command")
+        self.assertEqual(ctx.loop_prompt, "复盘今天的行情")
+
+
 if __name__ == "__main__":
     unittest.main()

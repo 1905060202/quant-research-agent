@@ -339,6 +339,9 @@ def _pre_verify(session_id: str = "", attempt: int = 0,
 
 
 def register(ctx) -> None:
+    # dsh 精华：fail-loud 启动自检——账本路径不可建/不可写此刻暴露，
+    # 不留到第一次 qra_verify 调用（坏盘/权限问题直接拒绝注册）
+    _connect().close()
     ctx.register_tool(
         name="qra_verify",
         toolset="qra",

@@ -28,6 +28,23 @@ def _say(ctx, text: str) -> None:
         ctx.console.print(text)
 
 
+def cmd_loop(ctx, args: str) -> None:
+    """CC /loop 对齐：自动继续模式（D007 P2 附录第 7 条立项）。
+
+    语义：/loop <prompt> 置位 ctx.loop_prompt，主循环消费后进入循环——
+    每轮结束自动以同 prompt 重跑，间隔默认 60s（QRA_LOOP_INTERVAL 覆盖），
+    Ctrl+C 任意时刻退出回提示符。进程内实现，不依赖 cron。
+    空参数只打印用法（离线，无 API 调用）。
+    """
+    prompt = args.strip()
+    if not prompt:
+        _say(ctx, "  用法：/loop <prompt>——每轮自动以同 prompt 继续，Ctrl+C 退出")
+        _say(ctx, "  间隔默认 60s（QRA_LOOP_INTERVAL 环境变量可调）；会话级，不落盘")
+        return
+    ctx.loop_prompt = prompt
+    _say(ctx, "  ⟳ 已进入 /loop 模式，Ctrl+C 退出")
+
+
 def _relative_time(ts) -> str:
     """本地相对时间（不 import hermes_cli.main，避免重型依赖）。"""
     if not ts:

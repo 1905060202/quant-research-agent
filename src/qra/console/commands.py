@@ -247,6 +247,10 @@ def _register_p0() -> None:
         "memory", "", "系统",
         "用 $EDITOR 打开 HERMES_HOME/memories/MEMORY.md",
         handlers.cmd_memory, aliases=("mem",)))
+    register(CommandDef(
+        "loop", "[prompt]", "系统",
+        "自动继续：每轮自动以同 prompt 重跑（间隔 60s，Ctrl+C 退出）",
+        handlers.cmd_loop, aliases=()))
 
 
 _register_p0()

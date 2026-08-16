@@ -60,3 +60,13 @@ qra_console 端到端 ×3（CoT 全展示/折叠 recap/工具块）；qra_python
 6. **审计 jsonl**：每笔执行落 `kernel_history/{sid}.jsonl`（P3 JSONL 双轨的前置数据）。
 7. **缺口：/loop**（雅宁指令④）：console 现有 /help /resume /sessions /clear /export /usage /status /model /memory /compact /yolo，**无 CC 的 /loop（自动继续模式）**。P1 立项：进程内调度器实现（空闲阈值后自动以 last prompt 继续），不依赖 cron。
 8. **P1 滚动**：dsh 精华吸收两项立即项（fail-loud 启动自检、配置 schema 硬校验）+ 内核内 bootstrap 辅助函数（prime rlm 简化版）。
+9. **P2.5 完全体移植（2026-08-16 雅宁拍板：「极简 bootstrap 不足以支撑工业实践，把 prime 完全体拿过来做些改造」）**：
+   - 极简 bootstrap（仅 _qra_save）作废，qra_runtime 完全体落地：`host_request` comm 桥（control 通道回执、type-last 防劫持）、`harness` 文件店（12 CRUD + 快照恢复 + 全局/会话双店）、`agent_message` 收件箱、`qra.run` 递归子代理（admission 语义 + `subagent_result` 轮询——QRA 增强，hermes 子代理不自报）。
+   - 宿主侧接线：iopub comm 路由（空 parent_header 先于 msg_id 过滤）、subagent 注册表、hermes subagent_lifecycle 接线、模型双路由（deepseek/opus proxy）。
+   - 验证：qra_python 38 用例全绿（桥/文件店/消息/子代理四类）+ 六层门禁全绿。
+   - 多上游同步机制（D009 §7）：vendor_sync.py UPSTREAMS 注册表——hermes=managed（自动合并+门禁）；prime/dsh=essence（钉针+diff 报告，嫁接面命中→人工 diff→重移植）。机制首秀 #10：prime 20 commits 命中 2 文件，审 diff 后判定零重移植（纯文档 + 宿主侧加固不动内核契约）。
+10. **P2.5 收官（2026-08-16）——toolset 发现修复 + 真实链路 e2e 实证**：
+    - 全链路易脏练习抓出老缺口：QRA 插件全系注册 toolset="qra"，hermes cli 平台默认工具集只有 18 个内置集、不含插件注册集 → qra_* 工具在 console 与 -z 均不可见（同根因）。qra_python 38 用例直测模块函数、绕开插件发现，六层门禁因此从未拦到。修复：console main.py 默认集 ∪ {"qra"}；run_qra.sh 动态解析内置集 ∪ {"qra"} 作默认 --toolsets（显式传参时尊重用户意图）。
+    - 冒烟脚本 `scripts/_smoke_qra_run.py`（pty 驱动真实 console + 文件双证据）跑通 qra.run 递归链路：模型调 qra_python → 内核 await qra.run → comm 桥 → hermes 子代理 admission → subagent_result 轮询到 `status='completed', summary='2 + 2 = 4。'`（内核审计 jsonl + 会话目录双证据）。首轮模型内核代码报错后自愈（exec 2 修正 child_id 属性访问），符合「模型驱动恢复」预期。冒烟脚本自身收尾顺序 bug 同批修复（先 /quit 后停 drain）。
+    - 门禁 #3 全绿（console main.py + run_qra.sh 修改后重验）。
+    - 冒烟脚本两代防作弊迭代（对 bench 防作弊设计的直接输入）：run5 模型读了冒烟脚本、思考文本直接引用 docstring 字面串导致 regex 假阳性（84s 假 hit，被文件证据门正确拒绝）；run6 修复 = docstring 移除「终态字样+预期答案」可背诵组合、PROMPT 禁 qra_python 之外一切工具、判定升级为「真实 32 位十六进制 CHILD_ID + completed 同现」（思考文本凑不出真实 id）、error 判定贴 CHILD_ID 段 600 字符窗口。run6 干净通过（161s，SMOKE_RC=0，模型 6 次失败自愈后终态 completed）。教训：**评测脚本本身不能把答案写给模型**，判定不能依赖模型可复述的文本。

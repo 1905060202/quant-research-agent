@@ -28,9 +28,12 @@ echo "== 1/6 py_compile =="
 "$PY" -m py_compile "$ROOT/src/qra/console/models_router.py" || FAIL=1
 "$PY" -m py_compile "$ROOT/src/qra/console/approvals.py" || FAIL=1
 "$PY" -m py_compile "$ROOT/src/qra/console/exporter.py" || FAIL=1
+"$PY" -m py_compile "$ROOT/src/qra/config_guard.py" || FAIL=1
+"$PY" -m py_compile "$ROOT/src/qra/vendor_sync.py" || FAIL=1
 
 echo "== 2/6 单测 =="
 (cd "$ROOT" && "$PY" -m unittest discover -s src/qra/console/tests 2>&1 | tail -3) || FAIL=1
+(cd "$ROOT" && "$PY" -m unittest discover -s src/qra/tests 2>&1 | tail -3) || FAIL=1
 
 echo "== 3/6 -z 工具题（真实 API）=="
 for i in 1 2; do
@@ -67,6 +70,7 @@ cases = [
     ("/model", "CC proxy"),
     ("/sessions", ("恢复会话", "没有可列出的会话")),
     ("/yolo", "YOLO 已关闭"),
+    ("/loop", "用法：/loop"),
 ]
 ok = run_console_cmd(sys.argv[1], cases)
 print(f"  命令 pty: {'✓' if ok else '✗'}")

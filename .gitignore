@@ -48,3 +48,4 @@ data/
 .hermes/verification_evidence.db
 bench/isolation/
 .hermes/qra_python/
+.hermes/lsp/

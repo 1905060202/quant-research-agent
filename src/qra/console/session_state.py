@@ -64,6 +64,7 @@ class CommandContext:
     events: object           # queue.Queue
     plain: bool
     pending: dict = field(default_factory=dict)   # {"resume": [listing rows]}
+    loop_prompt: str | None = None   # /loop 待启动的自动继续 prompt（主循环消费）
 
 
 class ConsoleHistory:

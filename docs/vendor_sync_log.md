@@ -68,3 +68,59 @@
 - **新增依赖**: pip 侧 jupyter_client / ipykernel / dill（已入 .venv-v7，非 vendor 嫁接，无需 GRAFT_PATHS）。
 - **门禁**: 六层全绿 ✓（py_compile / 单测 61 / -z 真实 API ×2 / 交互 pty ×2 / 命令 pty ×5 / qra_python 20 用例，GATE_RC=0）+ 内核套件连续两遍全绿（防 shell 队列竞态复现）。
 - **备注**: prime-agent 源码深挖 12 项 A 级机制全量吸收（逐变量快照/marker-line/防遮蔽 _b/恢复名单注入/dispose flush/busy-interrupt 等），详见 `docs/机理研究_prime源码深挖与dsh接插件评估_2026-08-16.md`。运行时状态 `.hermes/qra_python/` 已入 .gitignore（零凭据铁律同批扫描）。
+
+---
+
+## #7 · 2026-08-16 · prime 本质源入库（多上游机制之一，无 hermes pin 变更）
+
+- **范围**: `vendor/prime` = PrimeIntellect-ai/prime-agent，钉针 **83a0f9f9**（v0.7.2 release commit，`chore(release): prepare v0.7.2 (#1254)`），远端 upstream 已配，默认分支 = main（ls-remote 已验证）。
+- **执行方式**: vendor 克隆 + VERSION 钉针；多上游机制本次上线接管后续推进。
+- **嫁接面**: `PRIME_GRAFT_PATHS` 7 项登记——qra_runtime 三文件直接母本（rlm/__init__.py、rlm/harness.py、agent-message skill）+ comm 桥协议宿主侧 4 文件（kernel/index.ts、kernel/bootstrap.ts、tools/ipython.ts、agent-session.ts）。
+- **门禁**: 无（essence 源不自动落地到 QRA 代码）。
+- **备注**: 完全体移植（#9）从该钉针逐行移植，钉针是「移植基准」的记录。
+
+---
+
+## #8 · 2026-08-16 · dsh 本质源入库（多上游机制之一，无 hermes pin 变更）
+
+- **范围**: `vendor/dsh` = deepseek-ai/deepseek-harness，钉针 **47f94385**（master，`Merge pull request #2519 from deepseek-harness/feat/npm-public`），远端 upstream 已配。
+- **执行方式**: vendor 克隆 + VERSION 钉针；多上游机制本次上线接管后续推进。
+- **嫁接面**: `DSH_GRAFT_PATHS` 4 项登记——P1 精华「fail-loud 启动自检 + 配置 schema 硬校验」的 canonical 源（boot/app-boot/{index,invariant}.ts、settings-file/index.ts、settings/types.ts），借底座形态的 diff 溯源点。
+- **门禁**: 无。
+- **备注**: 同步形态与 prime 一致（essence）：推进钉针 + diff 报告，`needs_regraft` 标记待重移植。
+
+---
+
+## #9 · 2026-08-16 · prime 完全体移植 + 多上游同步机制（无 hermes pin 变更）
+
+- **范围**: （1）qra_runtime 完全体：host_request 桥（control 通道回执、type-last 防劫持）、harness 文件店 CRUD（12 方法 + 快照恢复）、agent_message 收件箱、qra.run 递归子代理 admission 语义 + subagent_result 轮询（QRA 增强：hermes 子代理不自报）；（2）vendor_sync.py 重构为 UPSTREAMS 注册表（hermes=managed 不变；prime/dsh=essence）；（3）`qra sync <upstream> [mode]` CLI + agent 工具 upstream 参数；（4）D009 §7。
+- **执行方式**: 完全体移植逐行对照 prime 母本（v0.7.2@83a0f9f9），宿主侧 comm 路由 + subagent 注册表 + 收件箱文件在 qra_python 插件落地。
+- **嫁接面**: 新增 PRIME_GRAFT_PATHS 7 项 + DSH_GRAFT_PATHS 4 项（见 #7/#8）；hermes GRAFT_PATHS 无新增。
+- **门禁**: 六层全绿 ✓（py_compile / console 单测 61 / vendor_sync 单测 16 / -z 真实 API ×2 / 交互 pty ×2 / 命令 pty ×5 / qra_python 38 用例，GATE_RC=0）——门禁第 1 层新增 vendor_sync.py 编译，第 2 层新增 src/qra/tests 发现目录。
+- **回滚点**: 无 pin 变更，无需回滚。
+- **备注**: 期间修复一个 env 传播 bug：jupyter_client 传 env 参数时 HERMES_HOME 不进内核 → harness 全局店误落真实 ~/.hermes（测试抓出，已清理污染文件）→ 修复 = spawn 时显式并 os.environ + 钉死 QRA_AGENT_DIR=$HERMES_HOME/qra_python，测试断言守护该回归。
+
+---
+
+## #10 · 2026-08-16 · prime 83a0f9f9 → 06e4a19d（essence 机制首秀：真命中 + 零重移植）
+
+- **范围**: 20 commits / 83 文件（v0.7.2 → 06e4a19d）。嫁接面命中 2 项，已逐行审 diff 并完成评估（见下），**重移植范围 = 零**。
+- **执行方式**: `qra sync prime report`（预检）→ 人工审 diff → `qra sync prime`（推进钉针，essence 不打门禁、不自动合并 QRA 代码）。
+- **嫁接面核对**: ⚠️ 命中 2 项——
+  - `prime-agent-runtime/src/rlm/harness.py`：纯文档修正（docstring 从 global-by-default 改为 session-local-by-default）。**QRA 移植版行为本来就符合新文档语义**（local 默认 + `global_=True` 跨会话），零代码变更。
+  - `packages/coding-agent/src/core/kernel/index.ts`（+76）：宿主侧（TS daemon）分发器的安全加固（HostRequestContext 权威上下文 + 品牌能力防伪造）。**内核→宿主线上契约未变**：`HOST_COMM_TARGET = "host.request"` 原样、回执仍是原样 payload。QRA 宿主是 hermes 自己的实现（_HOST_HANDLERS 白名单校验），不消费 prime 的分发器。零移植。
+  - 同期 #1387/#1390（spawn ledger 重构）未命中清单（daemon 内部元数据存储，QRA 宿主是 hermes subagent_lifecycle，无依赖）。
+- **门禁**: 未跑（essence 推进不触发；QRA 运行面代码零变更）。门禁在 #9 全绿。
+- **回滚点**: `cd vendor/prime && git checkout 83a0f9f9 && echo 83a0f9f9566219551fcb6ffaf7f519a815749a58 > VERSION`
+- **备注**: 机制设计意图首次真实验证——命中→人工 diff→评估→决策全链路走通。评估原则：**按 diff 事实判移植范围**（docs-only=零；契约未变=零），不是按「命中」机械重移植。
+
+---
+
+## #11 · 2026-08-16 · qra_* 工具在 console/-z 不可见——根因与修复（无 pin 变更）
+
+- **范围**: 无上游同步、无新嫁接。src/qra/console/main.py + scripts/run_qra.sh 两处修复。
+- **根因**: QRA 插件全系注册 toolset="qra"，而 hermes cli 平台默认工具集 = `_get_platform_tools({}, "cli")` 的 18 个内置集（实验实测），**不含插件注册的 "qra" 集** → 插件加载成功但工具不进会话工具表，console 与 -z 同根因。qra_python 38 个内核测试全部直测模块函数、绕开 register()/插件发现，六层门禁因此从未拦到过这个缺口——真实 console 冒烟（qra.run e2e）是第一次全链路易脏练习。
+- **修复**: console main.py 默认 toolsets = 内置集 ∪ {"qra"}（显式 --toolsets 时尊重用户意图）；run_qra.sh 启动前动态解析 `_get_platform_tools({}, "cli") | {"qra"}` 作默认 --toolsets 传参（不硬编码内置集名，上游漂移自动跟随；默认参数在前、用户 "$@" 在后，argparse 后者覆盖）。
+- **门禁**: 六层门禁 #3 全绿（含本修复）+ qra.run 递归链路 e2e 冒烟通过（详见 D007 P2.5）。
+- **回滚点**: 无 pin 变更，无需回滚。
+- **备注**: 教训复刻「qra_python 测试绕开插件发现」的老缺口——测试没走真实加载路径的层，e2e 冒烟是唯一兜底。冒烟脚本 `scripts/_smoke_qra_run.py` 的收尾顺序 bug（先 stop drain 后写 pty，console 早死时写满缓冲永久阻塞）同批修复。

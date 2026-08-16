@@ -31,7 +31,8 @@ uv pip install -e vendor/hermes-agent --no-deps --python .venv-v7/bin/python
 ln -s "$(pwd)/bin/qra" ~/.local/bin/qra     # 一次性，无需 sudo（备选 /usr/local/bin/qra）
 qra                                        # 直接进系统：prime 式 CoT 多轮交互（Ctrl+T 折叠思考）
 qra -z "查一下贵州茅台现价"                    # 传统单发问答，只回显最终答复
-qra sync                                   # 同步 hermes 上游（拉取→嫁接面核对→快进→门禁，D009）
+qra sync                                   # 同步 hermes 上游（拉取→嫁接面核对→快进→门禁，D009 §7）
+qra sync prime report                       # prime/dsh 本质源：钉针+diff 报告（嫁接面命中→人工重移植）
 # 入口本质：bin/qra 符号链接安全解析 → 裸调/console 走 scripts/qra_console.sh（CoT 全展示）
 #           qra sync 走 src.qra.vendor_sync，其余单发走 scripts/run_qra.sh
 

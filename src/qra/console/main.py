@@ -8,9 +8,10 @@
   - 多轮交互：同一 AIAgent 实例 + SessionState.history 续聊
 
 P0 命令面（CC/prime/hermes 原生功能对齐，2026-08-16）：
-  - / 命令：help/resume/sessions/clear/compact/export/model/yolo/usage/status/memory
+  - / 命令：help/resume/sessions/clear/compact/export/model/yolo/usage/status/memory/loop
   - ! 直达 shell（vendor bang_shell：同 terminal 工具同门审批，输出不进上下文）
   - ↑↓ 历史 / Tab 补全 / 大块粘贴确认 / 双路由切换（deepseek ↔ opus@8789）
+  - /loop 自动继续（CC 对齐，进程内调度器：每轮自动同 prompt 重跑，Ctrl+C 退出）
 
 架构（零 vendor 改动）：
   导入 run_agent.AIAgent（hermes 根模块公开类，oneshot/tui_gateway 同款先例），
@@ -417,6 +418,11 @@ def build_agent(args):
         toolsets = _normalize_toolsets(args.toolsets)
     if toolsets is None:
         toolsets = sorted(_get_platform_tools(cfg, "cli"))
+        # QRA 插件全系注册在 toolset="qra"（qra_quote/qra_signal/qra_kb_fts/
+        # qra_sync/qra_verify/qra_python）。hermes 的 cli 平台默认集只有 19 个
+        # 内置集，不含 qra——2026-08-16 qra.run 冒烟实测：插件加载成功但工具
+        # 不在会话工具表。并集补上（显式 --toolsets 覆盖时尊重用户意图）。
+        toolsets = sorted(set(toolsets) | {"qra"})
 
     ensure_mcp_discovery_before_agent_build(
         logger=logging.getLogger(__name__), single_query=True)
@@ -574,7 +580,7 @@ def parse_args(argv=None) -> argparse.Namespace:
     p = argparse.ArgumentParser(
         prog="qra console",
         description="QRA 控制台：prime 式 CoT 全展示（D007 Phase 1 + P0 命令面）",
-        epilog="交互中 /help 看全部命令（/resume /model /yolo /export …）、"
+        epilog="交互中 /help 看全部命令（/resume /model /yolo /loop /export …）、"
                " ! 直达 shell、↑↓ 历史、Ctrl+T 折叠思考；空输入或 Ctrl+D 退出。"
                " 输出被管道时自动降级为 plain（只打最终答复）。")
     p.add_argument("-z", "--prompt", help="单发提问（省略则进入多轮交互）")
@@ -593,6 +599,9 @@ def main(argv=None) -> int:
     if args.plain or not sys.stdout.isatty():
         args.plain = True
     console = Console()
+    # dsh 精华：fail-loud 配置门卫——坏配置当场 exit 2，不带病运行
+    from qra.config_guard import guard_config
+    guard_config()
 
     agent = session_db = None
     try:
@@ -619,6 +628,39 @@ def main(argv=None) -> int:
                 if final:
                     console.print(final)
             return result
+
+        def loop_mode(prompt: str) -> None:
+            """CC /loop 对齐：自动继续模式（进程内调度器，不依赖 cron）。
+
+            每轮结束 sleep 间隔后自动以同 prompt 重跑；Ctrl+C 在任意时刻
+            （回合中/间隔中）打断并退出循环回到提示符。间隔默认 60s，
+            QRA_LOOP_INTERVAL 环境变量覆盖（秒，正数）。
+            循环中打字由 InputLayer 后台 reader 缓冲，退出循环后照常回显。
+            """
+            try:
+                interval = max(1.0, float(os.environ.get("QRA_LOOP_INTERVAL", "60")))
+            except ValueError:
+                interval = 60.0
+            console.print(Text(
+                f"⟳ /loop 模式：每 {interval:.0f}s 自动继续「{prompt[:40]}…」"
+                if len(prompt) > 40 else
+                f"⟳ /loop 模式：每 {interval:.0f}s 自动继续「{prompt}」",
+                style="bold cyan"))
+            console.print(Text("  Ctrl+C 退出循环回到提示符", style="dim"))
+            n = 0
+            while True:
+                n += 1
+                console.print(Text(f"⟳ 第 {n} 轮", style="bold cyan"))
+                try:
+                    one_turn(prompt)
+                except KeyboardInterrupt:
+                    console.print(Text("(中断本轮，退出循环)", style="yellow"))
+                    return
+                try:
+                    time.sleep(interval)
+                except KeyboardInterrupt:
+                    console.print(Text("(退出循环)", style="yellow"))
+                    return
 
         if args.prompt:
             try:
@@ -671,6 +713,11 @@ def main(argv=None) -> int:
                     except KeyboardInterrupt:
                         console.print(Text("(中断本轮)", style="yellow"))
                         continue
+                # /loop 消费点：命令处理器置位后，主循环进入自动继续模式
+                if ctx.loop_prompt:
+                    pending_prompt = ctx.loop_prompt
+                    ctx.loop_prompt = None
+                    loop_mode(pending_prompt)
                 console.print()
         finally:
             inp.close()

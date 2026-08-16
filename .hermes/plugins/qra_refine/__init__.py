@@ -76,12 +76,18 @@ def register(ctx) -> None:  # noqa: ARG001 - 钩子签名约定
                         "该路径评审门未激活", name)
             continue
         setattr(bg, name, _wrap(original))
-    # 启动自检：读回确认
+    # 启动自检：读回确认（dsh fail-loud 升级——导入成功但零激活=静默失效，
+    # 必须响亮失败；部分激活=上游漂移，警告但不拦启动）
     state = {name: (_GATE_MARKER in (getattr(bg, name, "") or ""))
              for name in names}
     activated = [n for n, ok in state.items() if ok]
     log.info("qra_refine 评审门状态: %s", state)
     if len(activated) == 3:
         log.info("qra_refine：三个评审门已全部激活（memory/skills/combined）")
-    else:
+    elif activated:
         log.warning("qra_refine：部分评审门未激活: %s", state)
+    else:
+        raise RuntimeError(
+            "qra_refine：background_review 导入成功但三个评审门常量全部改写失败，"
+            f"状态 {state}——上游可能已重构提示词路径，评审门等于静默失效，"
+            "拒绝带病注册（dsh fail-loud）")

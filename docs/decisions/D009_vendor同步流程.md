@@ -81,3 +81,56 @@ echo <旧钉针> > VERSION
 3. **嫁接面清单**：上游动我们依赖的内部面 → 自动拦截，人工评估后才落地。
 4. **回归门禁**：每次同步都用真实 API E2E 验证 QRA 核心路径没被打断。
 5. **可回滚**：任何一次同步都可一键回到上一个已知良好钉针。
+
+## 7. 多上游同步（2026-08-16，essence 源机制）
+
+雅宁 2026-08-16 拍板：「极简 bootstrap 不足以支撑工业实践……像 hermes 同步那样，
+prime、deepseek-harness 也是极具价值的项目，未来它们更新、升级，也要把 diff 合并
+到我们的 agent 中去」。由此 vendor_sync 从单上游扩展为注册表形态：
+`src/qra/vendor_sync.py` 的 `UPSTREAMS`（hermes / prime / dsh 三条配置）。
+
+### 7.1 两个同步形态
+
+| 形态 | 上游 | 语义 |
+|---|---|---|
+| **managed** | hermes（基底） | §1-§5 现状不变：ff-only + 嫁接面硬拦截 + 门禁 + 失败自动回滚 |
+| **essence** | prime / dsh（本质源） | 推进 vendor 钉针 + diff 报告；**不自动合并到 QRA 代码** |
+
+essence 的 vendor 克隆只是「源头材料」：QRA 侧移植活在 src/qra/ 与
+.hermes/plugins/ 里（qra_runtime 完全体 = prime rlm 的移植）。上游动了嫁接面
+文件 → 结果 `needs_regraft=True`（CLI 打印 ⚠️ 待重移植清单；agent 工具回传
+needs_regraft 字段），人工 diff → 重移植到 QRA 侧 → 门禁跑通后闭环。
+essence 推进不打门禁：新代码未进 QRA 运行面（直到重移植完成）。
+essence 的 full 与 apply 等价（无门禁步骤），report=只拉取核对不落地。
+
+### 7.2 命令与入口
+
+```
+qra sync <upstream> [full|apply|report]   # upstream: hermes|prime|dsh；默认 hermes full
+qra sync                                   # 与旧版完全兼容（hermes 完整同步）
+```
+
+- agent 工具 qra_sync 增加 `upstream` 参数——对话里说「同步 prime」即触发。
+- 兼容承诺：`scripts/vendor_sync.sh` 薄壳（--apply/--full 映射）与旧参数
+  位不变，`qra sync report` 等旧用法语义不变（= hermes report）。
+
+### 7.3 嫁接面清单
+
+- `GRAFT_PATHS`（hermes，managed）33 项，§2 语义不变。
+- `PRIME_GRAFT_PATHS`（essence）7 项：qra_runtime 三文件的直接母本
+  （prime-agent-runtime/src/rlm/__init__.py、rlm/harness.py、agent-message
+  skill 的 agent_message/__init__.py）+ comm 桥协议宿主侧 4 文件
+  （coding-agent/src/core/kernel/index.ts、kernel/bootstrap.ts、
+  tools/ipython.ts、agent-session.ts——target "qra.host.request"、control
+  通道回执、comm open type-last 的语义源头，协议变更必须人工复核）。
+- `DSH_GRAFT_PATHS`（essence）4 项：P1 精华「fail-loud 启动自检 + 配置
+  schema 硬校验」的 canonical 源（boot/app-boot 的 index.ts、invariant.ts；
+  settings-file/index.ts、settings/types.ts）。借底座形态——QRA 侧实现是
+  config_guard.py + qra_python 启动自检，这些文件是 diff 复核的溯源点。
+
+### 7.4 钉针现状（2026-08-16）
+
+- hermes 11c5aae（managed，门禁全绿钉针）；prime 83a0f9f9（v0.7.2 release
+  commit，essence，已验证远端默认分支 = main）；dsh 47f94385（master，
+  essence）。vendor 整体 gitignore；VERSION 是 QRA 自己的 pin 文件。
+- 上游若改默认分支，改 UPSTREAMS 里对应 branch 字段即可。

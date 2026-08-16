@@ -1,0 +1,7 @@
+name: qra_python
+version: 0.1.0
+description: "QRA Python 持久内核工具（D007 P2）：会话级 Jupyter 内核执行 Python，变量跨调用存活、dill 快照跨重启自动复活；内核预装 qra_runtime（qra.run 递归子代理 / qra.subagent_result 轮询 / harness 持久 CRUD / agent_message 消息）"
+author: QRA
+kind: standalone
+provides_tools:
+  - qra_python

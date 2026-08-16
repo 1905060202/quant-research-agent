@@ -24,6 +24,21 @@ if [[ -z "${ANTHROPIC_TOKEN:-}" ]]; then
 fi
 export ANTHROPIC_BASE_URL="${ANTHROPIC_BASE_URL:-https://api.deepseek.com/anthropic}"
 
+# QRA 工具集并集：hermes cli 平台默认集只有 19 个内置集，不含插件注册的
+# "qra" 集（2026-08-16 qra.run 冒烟实测：插件加载成功但工具不在会话工具表，
+# console 与 -z 同根因）。动态解析默认集再并上 qra——不硬编码内置集名，
+# 上游漂移自动跟随。默认 --toolsets 在前、用户 "$@" 在后：argparse 后者
+# 覆盖前者，显式指定工具集的用户意图优先。
+DEFAULT_TOOLSETS="$(
+  .venv-v7/bin/python - <<'PYEOF'
+import sys
+sys.path.insert(0, "vendor/hermes-agent")
+from hermes_cli.tools_config import _get_platform_tools
+print(",".join(sorted(_get_platform_tools({}, "cli") | {"qra"})))
+PYEOF
+)"
+
 exec .venv-v7/bin/hermes "$@" \
+    --toolsets "$DEFAULT_TOOLSETS" \
     --model deepseek-v4-pro \
     --provider anthropic
