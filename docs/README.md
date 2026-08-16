@@ -7,8 +7,8 @@
 
 | 你是谁 / 要干嘛 | 读什么（顺序） |
 |---|---|
-| **新 session 接手**（第一次碰这个项目） | 仓库根 `HANDOFF_新session必读.md` → 本页 → `docs/architecture.md` → `docs/reference.md` |
-| **日常开发**（改代码/加功能） | `docs/development.md`（工作流+铁律+提交协议）→ 相关 ADR → `docs/troubleshooting.md` 查已知坑 |
+| **新 session 接手**（第一次碰这个项目） | 仓库根 `HANDOFF_新session必读.md` → 本页 → `docs/blueprint.md`（总纲，尤其 §5 flash 执行规范）→ `docs/architecture.md` → `docs/reference.md` |
+| **日常开发**（改代码/加功能） | `docs/blueprint.md` §5（分档判定：这活归执行层还是设计层）→ `docs/development.md`（工作流+铁律+提交协议）→ 相关 ADR → `docs/troubleshooting.md` 查已知坑 |
 | **改架构 / 理解架构** | `docs/architecture.md` → `docs/decisions/`（为什么这么定）→ `docs/融合架构_v1.0_2026-08-14.md`（历史蓝图） |
 | **上游同步 / 嫁接面** | `docs/vendor_sync_log.md`（账本）→ `docs/decisions/D009_*.md` → `src/qra/vendor_sync.py` GRAFT_PATHS |
 | **跑评测 / 改评测** | `bench/README.md` → `docs/decisions/D003_*.md` |
@@ -19,6 +19,7 @@
 
 | 文档 | 权威程度 | 内容 |
 |---|---|---|
+| `docs/blueprint.md` | ★★★ 总纲 | 全局宏观设计总纲：为什么这么设计、存量问题总表、迭代机制、flash 执行规范（双档分工/升级信号/禁区）。执行者先读 §5；总纲修订=设计层任务 | 
 | `docs/architecture.md` | ★ 权威 | 当前架构（分层/执行线/目录/插件面/钉针） |
 | `docs/development.md` | ★ 权威 | 开发工作流、铁律、测试体系、提交推送协议、脱敏红线 |
 | `docs/ci.md` | ★ 权威 | CI 管道与本地/CI 矩阵 |
@@ -47,6 +48,7 @@
 
 | 改动 | 必须同步 |
 |---|---|
+| 设计原则/存量问题总表/迭代机制/双档分工 | `docs/blueprint.md`（总纲修订=设计层任务，见其 §7） |
 | 架构/目录/插件面/执行线 | `docs/architecture.md` |
 | 工作流/门禁/提交协议 | `docs/development.md` + `scripts/verify_qra.sh` 头注释 |
 | CI 管道 | `docs/ci.md` |
