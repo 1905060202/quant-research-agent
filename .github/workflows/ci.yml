@@ -1,0 +1,54 @@
+name: CI
+
+# 零 secret 管道：不注入任何凭据，只跑离线层（verify_qra.sh --offline = 层 1/2/6）
+# + 零凭据扫描 + 文档核对。设计口径见 docs/ci.md（本地与 CI 同款命令）。
+#
+# 触发：push 到 main / PR / 手动（Actions 页 Run workflow）。
+# 注：本地完整门禁含真实 API 层 3/4/5，CI 跑不了（零凭据原则），
+#     所以完整门禁永远在本地跑完再 push——见 docs/development.md 推送前检查单。
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  offline-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # 底座按钉针克隆（钉针 = docs/vendor_sync_log.md 的 hermes-agent pin；
+      # 漂移由本地 qra sync 门禁负责，CI 只保证「钉针下可复现」）
+      - name: Clone hermes-agent at pin
+        run: |
+          git clone --filter=blob:none --no-checkout \
+            https://github.com/NousResearch/hermes-agent.git vendor/hermes-agent
+          cd vendor/hermes-agent
+          git fetch --depth 1 origin 11c5aae104cb95b5141744dcb277448ef8b24dce
+          git checkout FETCH_HEAD
+
+      - name: Install deps (venv + hermes-agent + kernel)
+        run: |
+          python -m venv .venv-v7
+          .venv-v7/bin/pip install --upgrade pip
+          .venv-v7/bin/pip install -e vendor/hermes-agent
+          .venv-v7/bin/pip install jupyter_client ipykernel dill
+
+      # 离线门禁：py_compile / 单测 / qra_python 内核 38 用例
+      - name: Offline gate (verify_qra.sh --offline)
+        run: bash scripts/verify_qra.sh --offline
+
+      # 零凭据扫描：命中 sk-xxx 即红（脱敏红线第 3 条）
+      - name: Credential scan
+        run: bash scripts/scan_credentials.sh
+
+      # 文档核对：链接与行内路径存在性
+      - name: Doc link check
+        run: .venv-v7/bin/python scripts/check_docs.py

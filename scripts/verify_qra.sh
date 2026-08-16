@@ -11,9 +11,16 @@
 #      （执行/跨轮变量/dill 恢复/bench 题 + 机理：中断·自愈·LRU·debounce）
 #
 # 用法：scripts/verify_qra.sh          # 全部门禁（含真实 API，约 4-7 分钟）
+#       scripts/verify_qra.sh --offline # 离线层 1/2/6（CI 同款，零凭据零网络）
 # 返回非零 = 门禁失败
 
 set -uo pipefail
+
+# --offline：只跑不依赖凭据与网络的层（1/2/6），与 .github/workflows/ci.yml 同款。
+if [[ "${1:-}" == "--offline" ]]; then
+    OFFLINE=1
+    shift
+fi
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 PY="$ROOT/.venv-v7/bin/python"
@@ -36,6 +43,7 @@ echo "== 2/6 单测 =="
 (cd "$ROOT" && "$PY" -m unittest discover -s src/qra/tests 2>&1 | tail -3) || FAIL=1
 
 echo "== 3/6 -z 工具题（真实 API）=="
+if [ "${OFFLINE:-0}" -ne 1 ]; then
 for i in 1 2; do
     "$PY" - "$ROOT" "$i" <<'PYEOF' || FAIL=1
 import sys
@@ -46,8 +54,12 @@ print(f"  -z#{sys.argv[2]}: {'✓' if ok else '✗'}")
 sys.exit(0 if ok else 1)
 PYEOF
 done
+else
+    echo "  （--offline 跳过：需真实 API 凭据）"
+fi
 
 echo "== 4/6 console 交互 pty 竞态 =="
+if [ "${OFFLINE:-0}" -ne 1 ]; then
 for i in 1 2; do
     "$PY" - "$ROOT" "$i" <<'PYEOF' || FAIL=1
 import sys
@@ -58,8 +70,12 @@ print(f"  交互#{sys.argv[2]}: {'✓' if ok else '✗'}")
 sys.exit(0 if ok else 1)
 PYEOF
 done
+else
+    echo "  （--offline 跳过：需真实 API 凭据）"
+fi
 
 echo "== 5/6 命令 pty（全离线）=="
+if [ "${OFFLINE:-0}" -ne 1 ]; then
 "$PY" - "$ROOT" <<'PYEOF' || FAIL=1
 import sys
 sys.path.insert(0, sys.argv[1] + "/scripts")
@@ -76,6 +92,9 @@ ok = run_console_cmd(sys.argv[1], cases)
 print(f"  命令 pty: {'✓' if ok else '✗'}")
 sys.exit(0 if ok else 1)
 PYEOF
+else
+    echo "  （--offline 跳过：console 启动依赖本地环境）"
+fi
 
 echo "== 6/6 qra_python 持久内核（D007 P2）=="
 "$PY" -m py_compile "$ROOT/.hermes/plugins/qra_python/__init__.py" || FAIL=1
