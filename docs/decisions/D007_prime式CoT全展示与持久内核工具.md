@@ -47,3 +47,16 @@ prime ipython 设计落地为**插件工具**（非替换现有工具）：
 ## 验证
 
 qra_console 端到端 ×3（CoT 全展示/折叠 recap/工具块）；qra_python 四级（执行→跨轮变量→dill 恢复→bench 题）；JSONL 双轨抽查。
+
+## P2 落地记录（2026-08-16）
+
+`.hermes/plugins/qra_python/` 已落地并通过门禁第 6 层（20 用例 ×2 连续绿）。范围变化与新增事实：
+
+1. **prime 源码深挖后全量吸收 12 项 A 级机制**（逐变量快照/256MiB+原子替换/快照时过滤/marker-line 协议/防遮蔽 _b 别名/恢复顺序契约/恢复名单注入/JSON manifest/dispose 最终 flush 5s 上限/busy-interrupt 500ms×5s/allow_stdin=false/NO_COLOR），详见 `docs/机理研究_prime源码深挖与dsh接插件评估_2026-08-16.md` 1.2 表。
+2. **快照 debounce 保留 QRA 参数（15s+30s）**：prime 是 1500ms 无间隔，量化内核常驻大 DataFrame，每笔执行序列化代价不可接受——这是刻意的分歧，已文档化。
+3. **死内核自动重启+快照复活是 QRA 增强**（prime 无重启，restart() 是死代码）；执行中死亡 5s 探活检测。
+4. **定位升级为全生命周期计算底座**（雅宁 2026-08-16 指令③）：工具描述去 quant 化——算指标/回测/数据处理/通用实验都行，「把复用逻辑写成函数留在内核里」是首要模式。prime 实证（26h/1229 调用全走单内核零重启）支撑该定位。
+5. **安全边界诚实声明**：宿主用户权限 + workspace 目录隔离，非沙箱（与 prime 一致）；已有 execute_code/terminal 同权，风险记录不新增面。
+6. **审计 jsonl**：每笔执行落 `kernel_history/{sid}.jsonl`（P3 JSONL 双轨的前置数据）。
+7. **缺口：/loop**（雅宁指令④）：console 现有 /help /resume /sessions /clear /export /usage /status /model /memory /compact /yolo，**无 CC 的 /loop（自动继续模式）**。P1 立项：进程内调度器实现（空闲阈值后自动以 last prompt 继续），不依赖 cron。
+8. **P1 滚动**：dsh 精华吸收两项立即项（fail-loud 启动自检、配置 schema 硬校验）+ 内核内 bootstrap 辅助函数（prime rlm 简化版）。

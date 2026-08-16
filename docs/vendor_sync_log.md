@@ -59,3 +59,12 @@
 - **新增嫁接**: hermes_cli/bang_shell.py、hermes_cli/session_listing.py、hermes_cli/cli_commands_mixin.py（/resume 序列母本）、tools/terminal_tool.py、tools/todo_tool.py、tools/memory_tool.py、agent/agent_runtime_helpers.py、agent/conversation_compression.py、agent/memory_manager.py、agent/model_metadata.py、gateway/session_context.py（补登欠账，main.py 早已 import）、hermes_constants.py。
 - **门禁**: 五层全绿 ✓（py_compile / 单测 61 / -z 真实 API ×2 / 交互 pty 竞态 ×2 / 命令 pty ×5，GATE_RC=0）+ 全链路冒烟连续两遍全绿（scripts/_smoke_console.py：命令面 → 真实提问 → /clear → /sessions → /resume 链 → 双路由往返 → 大块粘贴确认 → state.db/导出抽查）。冒烟期间抓出并修复 3 个测试框架自身 bug：pty 双向互锁（常驻 drainer）、marker 撞车（"最近会话" 在 /help 里也有→改 ┃  # 计数等待）、check_db 表选择无序（session_model_usage 误当 sessions）。
 - **备注**: 所有命令处理器的 vendor 序列照抄官方实现并注释了 文件:行号 依据（cli_commands_mixin.py:1010-1143 等），上游改动这些文件会被嫁接面核对拦住人工复核。
+
+---
+
+## #6 · 2026-08-16 · qra_python 持久内核插件（D007 P2，无 pin 变更）
+
+- **范围**: 无上游同步、无新嫁接。新增 `.hermes/plugins/qra_python/`（插件 + tests）+ `config.yaml` 启用 + 门禁第 6 层。
+- **新增依赖**: pip 侧 jupyter_client / ipykernel / dill（已入 .venv-v7，非 vendor 嫁接，无需 GRAFT_PATHS）。
+- **门禁**: 六层全绿 ✓（py_compile / 单测 61 / -z 真实 API ×2 / 交互 pty ×2 / 命令 pty ×5 / qra_python 20 用例，GATE_RC=0）+ 内核套件连续两遍全绿（防 shell 队列竞态复现）。
+- **备注**: prime-agent 源码深挖 12 项 A 级机制全量吸收（逐变量快照/marker-line/防遮蔽 _b/恢复名单注入/dispose flush/busy-interrupt 等），详见 `docs/机理研究_prime源码深挖与dsh接插件评估_2026-08-16.md`。运行时状态 `.hermes/qra_python/` 已入 .gitignore（零凭据铁律同批扫描）。
