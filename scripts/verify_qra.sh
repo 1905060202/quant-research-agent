@@ -44,8 +44,19 @@ echo "== 1/6 py_compile =="
 "$PY" -m py_compile "$ROOT/src/qra/vendor_sync.py" || FAIL=1
 
 echo "== 2/6 单测 =="
-(cd "$ROOT" && "$PY" -m unittest discover -s src/qra/console/tests 2>&1 | tail -3) || FAIL=1
-(cd "$ROOT" && "$PY" -m unittest discover -s src/qra/tests 2>&1 | tail -3) || FAIL=1
+# 失败详情必须落盘：tail -3 会丢 flaky 证据，无法复现
+for _suite in "console/tests" "tests"; do
+    _out="$(mktemp /tmp/qra_gate_XXXX.log)"
+    if (cd "$ROOT" && "$PY" -m unittest discover -s "src/qra/$_suite" > "$_out" 2>&1); then
+        tail -3 "$_out"
+    else
+        FAIL=1
+        tail -3 "$_out"
+        echo "  失败详情（$_suite）:"
+        grep -A 12 -E "^(FAIL|ERROR):" "$_out" | head -60
+    fi
+    rm -f "$_out"
+done
 
 echo "== 3/6 -z 工具题（真实 API）=="
 if [ "${OFFLINE:-0}" -ne 1 ]; then

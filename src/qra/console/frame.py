@@ -32,7 +32,15 @@ PANEL_MAX = 10  # 面板带最大行数（含标题行）
 
 
 def _slice_disp(s: str, start: int, end: int) -> str:
-    """按显示宽度切片（CJK 宽字符感知）；边界上放不下的字符整字跳过。"""
+    """按显示宽度切片（CJK 宽字符感知）。
+
+    整字纪律：起点越过 start 的宽字符收进本行（终端折行语义——该字
+    放不下上一行，整字折到本行渲染），不得丢字；终点越过 end 的停
+    （不可拆）。现役调用方：活动条/面板/菜单文本截断（start=0）。
+    _prompt_layout 已改为单遍扫描，不再走本函数。
+    2026-08-17 修复：原版把「起点跨界」的字整字跳过 → 行文本与
+    (s,e) 光标/点击映射不一致。
+    """
     out: list[str] = []
     pos = 0
     for ch in s:
@@ -42,8 +50,10 @@ def _slice_disp(s: str, start: int, end: int) -> str:
         if pos + w <= start:
             pos += w
             continue
-        if pos >= start and pos + w <= end:
+        if pos + w <= end:
             out.append(ch)
+        else:
+            break   # 跨 end 整字不可拆
         pos += w
     return "".join(out)
 
@@ -51,6 +61,17 @@ def _slice_disp(s: str, start: int, end: int) -> str:
 def _pad_disp(s: str, width: int) -> str:
     w = cell_len(s)
     return s + " " * max(0, width - w)
+
+
+def _char_at_disp(s: str, col: int) -> int:
+    """显示列 → 字符下标：返回第一个「终点越过 col」的字符下标
+    （与 input_layer._pos_at_display_col 同语义，此处用 cell_len 宽度）。"""
+    width = 0
+    for i, ch in enumerate(s):
+        if width + cell_len(ch) > col:
+            return i
+        width += cell_len(ch)
+    return len(s)
 
 
 class Frame:
@@ -84,9 +105,49 @@ class Frame:
 
     # ------------------------------------------------------------ 布局
 
-    def _prompt_rows(self) -> int:
+    def _prompt_layout(self) -> list[tuple[str, int, int]]:
+        """提示符带逐行布局：[(行文本, full 起点, full 终点)]，硬换行 + 折行感知。
+
+        full = prompt + draft 按 \\n 分段（硬换行：段空也占一行），段内按
+        显示宽折行。每行文本是终端安全片段——不含 \\n/\\r/\\t（cell_len
+        对三者宽 0，原样打印会触发终端换行/回车/制表跳，宽度模型失配；
+        2026-08-17 雅宁实测「粘贴多行→第二行消失→按键→终端全崩」根因）。
+
+        单遍扫描 O(len(full))，两条不变量：
+        ① 每行显示宽 ≤ 终端宽。旧窗口算法在行界切进宽字符中间时会产出
+           超宽行（宽 3 终端上 "中中" 4 列），真终端二次折行 → 再错位
+           （与崩溃同源）；② 跨行界的宽字符整字带到下一行，不拆字不丢字。
+           光标/点击映射只依赖 (s, e) 区间，行文本不参与反向换算。
+        性能：旧实现每行界 _char_at_disp 从头重扫 → O(n²/行宽)；5000 字符
+        粘贴 × 每键重绘曾挂死整个输入线程（2026-08-17 faulthandler 实证）。
+        """
         w = self.tio.width
-        return max(1, (cell_len(self.prompt + self.draft) + w - 1) // w)
+        full = self.prompt + self.draft
+        rows: list[tuple[str, int, int]] = []
+        pos = 0  # 段起点（full 下标）
+        for seg in full.split("\n"):
+            buf: list[str] = []
+            c = 0           # 当前行累计显示宽
+            row_s = pos     # 当前行 full 起点
+            for k, ch in enumerate(seg):
+                cw = cell_len(ch)
+                if c + cw > w and buf:
+                    # 满行且下一字放不下：切行，宽字符整字带到下一行
+                    rows.append(("".join(buf), row_s, pos + k))
+                    buf = [ch]
+                    c = cw
+                    row_s = pos + k
+                else:
+                    buf.append(ch)
+                    c += cw
+            rows.append(("".join(buf), row_s, pos + len(seg)))
+            pos += len(seg) + 1  # +1 跳过 \n 本身
+        if not rows:
+            rows.append(("", 0, 0))
+        return rows
+
+    def _prompt_rows(self) -> int:
+        return len(self._prompt_layout())
 
     def _menu_rows(self) -> int:
         return len(self.menu[0]) if self.menu else 0
@@ -203,10 +264,8 @@ class Frame:
         row = top
         pr, mr, ar, pr2 = self._zones()
         self._prompt_rows_drawn = pr
-        # 提示符带
-        full = self.prompt + self.draft
-        for i in range(pr):
-            seg = _slice_disp(full, i * w, (i + 1) * w)
+        # 提示符带（多行草稿：逐行布局，行文本终端安全）
+        for i, (seg, _s, _e) in enumerate(self._prompt_layout()):
             self.tio.move(row + i, 1)
             self.tio.erase_line()
             if self.busy:
@@ -304,17 +363,24 @@ class Frame:
             self._draw_panel_at(row, self.tio.width)
             self.tio.move(*saved)
 
-    def _redraw_prompt_zone(self) -> None:
-        """提示符带原地重绘（草稿/光标变化），save/restore；idle 落输入光标。"""
+    def _redraw_prompt_zone(self,
+                            layout: list[tuple[str, int, int]] | None = None
+                            ) -> None:
+        """提示符带原地重绘（草稿/光标变化），save/restore；idle 落输入光标。
+
+        layout 由 input_changed 传入：一次 O(n) 布局在重绘/光标落位间
+        复用。旧版每键 4 次布局（input_changed/_redraw/_place_cursor 各
+        算一遍），O(n²) 布局下 5000 字符粘贴直接挂死（2026-08-17）。
+        """
         with self.tio.locked():
             saved = self.tio.cursor_pos
             top = self._frame_top()
-            pr = self._prompt_rows()
+            if layout is None:
+                layout = self._prompt_layout()
+            pr = len(layout)
             self._prompt_rows_drawn = pr
             w = self.tio.width
-            full = self.prompt + self.draft
-            for i in range(pr):
-                seg = _slice_disp(full, i * w, (i + 1) * w)
+            for i, (seg, _s, _e) in enumerate(layout):
                 self.tio.move(top + i, 1)
                 self.tio.erase_line()
                 if self.busy:
@@ -326,28 +392,59 @@ class Frame:
             if self.busy and not self.modal_active:
                 self.tio.move(*saved)
             else:
-                self._place_input_cursor()
+                self._place_input_cursor(layout)
 
-    def _place_input_cursor(self) -> None:
-        """光标落草稿光标位（提示符带内换行感知）。"""
+    def _place_input_cursor(self,
+                            layout: list[tuple[str, int, int]] | None = None
+                            ) -> None:
+        """光标落草稿光标位（硬换行 + 折行感知）。
+
+        光标 full 下标 = len(prompt) + cursor；落在第一个 s ≤ pos ≤ e 的
+        行上。行尾满列（col == 行宽）落下一行行首，避开终端的
+        pending-wrap 状态。
+        """
         w = self.tio.width
-        prefix = self.prompt + self.draft[:self.cursor]
-        d = cell_len(prefix)
+        full = self.prompt + self.draft
+        pos = len(self.prompt) + self.cursor
         top = self._frame_top()
-        self.tio.move(top + d // w, d % w + 1)
+        if layout is None:
+            layout = self._prompt_layout()
+        for r, (_text, s, e) in enumerate(layout):
+            if s <= pos <= e:
+                col = cell_len(full[s:pos])
+                if col >= w:
+                    self.tio.move(top + r + 1, 1)
+                else:
+                    self.tio.move(top + r, col + 1)
+                return
+        self.tio.move(top, 1)
+
+    def click_to_draft(self, row: int, col: int) -> int | None:
+        """帧内提示符带行/列（0 基）→ draft 字符下标；越界返回 None。
+
+        行超出提示符带返回 None；列超出该行右端钳到行尾。空行点击落
+        该行行首（\\n 后位置）。
+        """
+        layout = self._prompt_layout()
+        if not (0 <= row < len(layout)):
+            return None
+        text, s, e = layout[row]
+        idx = min(e, s + _char_at_disp(text, col))
+        # 钳到 draft 长（超右端钳行尾时 e 可达 len(full) > len(prompt)+len(draft)）
+        return min(len(self.draft), max(0, idx - len(self.prompt)))
 
     # ------------------------------------------------------------ 状态变更
 
     def input_changed(self, draft: str, cursor: int) -> None:
         """输入线程每键调用：草稿变化 → 提示符带重绘（busy 也实时回显）。"""
         self.draft, self.cursor = draft, cursor
-        pr = self._prompt_rows()
         if self.modal_active:
             return
-        if pr != self._prompt_rows_drawn:
+        layout = self._prompt_layout()  # 单遍 O(n)：换行数/行文本/映射一次算齐
+        if len(layout) != self._prompt_rows_drawn:
             self.present()  # 换行数变化 → 帧高变化 → 结构重绘
         else:
-            self._redraw_prompt_zone()
+            self._redraw_prompt_zone(layout)
 
     def set_busy(self, busy: bool) -> None:
         if busy == self.busy:

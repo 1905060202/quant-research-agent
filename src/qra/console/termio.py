@@ -49,9 +49,13 @@ class TermIO:
     """串行终端输出。构造时刻绑定真实 stdout 的文件对象（回合内
     redirect_stdout 不影响它——main.run_turn 同款约定）。"""
 
-    def __init__(self, file: Any | None = None) -> None:
+    def __init__(self, file: Any | None = None,
+                 width: int | None = None, height: int | None = None) -> None:
         self._lock = threading.RLock()
         self.file = file if file is not None else sys.stdout
+        # 尺寸注入（测试/嵌入场景）：None = 每次现取真实终端
+        # （_term_size 有 ≥20 钳制，窄屏测试无法走 env，须显式注入）
+        self._w, self._h = width, height
         try:
             self._fd = self.file.fileno()
         except (OSError, AttributeError, ValueError, io.UnsupportedOperation):
@@ -65,11 +69,11 @@ class TermIO:
 
     @property
     def width(self) -> int:
-        return _term_size()[0]
+        return self._w if self._w is not None else _term_size()[0]
 
     @property
     def height(self) -> int:
-        return _term_size()[1]
+        return self._h if self._h is not None else _term_size()[1]
 
     # ------------------------------------------------------------ 光标模型
 

@@ -158,9 +158,10 @@ class TabCompletionTests(unittest.TestCase):
         il = self._layer()
         os.write(self.w, b"/m\t")
         deadline = time.time() + 2
-        while il.draft() != "/m\t" and time.time() < deadline:
+        while il.draft() != "/m    " and time.time() < deadline:
             time.sleep(0.02)
-        self.assertEqual(il.draft(), "/m\t")   # 无进展：Tab 落为字面量
+        # 无进展：Tab 落为 4 空格（字面 \t 会触发终端制表跳，宽度模型失配）
+        self.assertEqual(il.draft(), "/m    ")
         il.close()
 
 
@@ -300,6 +301,75 @@ class PasteIntegrationTests(unittest.TestCase):
             time.sleep(0.02)
         self.assertEqual(il.draft(), "")        # 草稿被清
         self.assertTrue(il._q.empty())          # 不提交任何行
+        il.close()
+
+
+class MultilinePasteTests(unittest.TestCase):
+    """多行草稿（2026-08-17 崩溃修复回归锁）。
+
+    根因：粘贴内容里的 \\n 曾作为普通字符插进 LineBuffer，帧按单行宽度
+    模型渲染（cell_len(\\n)=0）→ 行文本含真换行 → 终端错位 → 每键重绘
+    加剧 → 终端模拟器崩溃（雅宁实测 01:43 所有 shell 全没）。修复后：
+    \\n 保留为多行草稿（帧换行感知），\\r/\\t 规范化。
+    """
+
+    def setUp(self):
+        self.r, self.w = os.pipe()
+        self._fake = os.fdopen(self.r, "rb")
+        self._old_stdin = sys.stdin
+        self._layers = []
+        sys.stdin = self._fake
+
+    def tearDown(self):
+        for il in self._layers:
+            il.close()
+        sys.stdin = self._old_stdin
+        self._fake.close()
+        os.close(self.w)
+
+    def _layer(self, **kw):
+        il = InputLayer(TurnState(True), **kw)
+        il._tty_out = None
+        self._layers.append(il)
+        il.start()
+        return il
+
+    def _paste(self, payload: bytes) -> None:
+        os.write(self.w, b"\x1b[200~" + payload + b"\x1b[201~")
+
+    def test_paste_multiline_keeps_newline_in_draft(self):
+        il = self._layer()
+        self._paste("line1\nline2".encode())
+        _wait_draft(il, "line1\nline2")
+        self.assertEqual(il.draft(), "line1\nline2")
+
+    def test_paste_normalizes_crlf_cr_tab(self):
+        il = self._layer()
+        self._paste(b"a\r\nb\tc\r")
+        _wait_draft(il, "a\nb    c\n")
+        self.assertEqual(il.draft(), "a\nb    c\n")
+
+    def test_multiline_submit_sends_whole_draft(self):
+        il = self._layer()
+        self._paste(b"line1\nline2")
+        _wait_draft(il, "line1\nline2")
+        os.write(self.w, b"\r")           # Enter 提交整串
+        line = il.pop()
+        self.assertEqual(line, "line1\nline2")
+        _wait_draft(il, "")
+
+    def test_multiline_draft_does_not_open_menu(self):
+        il = self._layer(menu_provider=commands.menu_items)
+        self._paste("/resume\n继续".encode())
+        _wait_draft(il, "/resume\n继续")
+        self.assertIsNone(il._menu)       # 多行不弹斜杠菜单
+
+    def test_crlf_paste_then_enter_submits_normalized(self):
+        il = self._layer()
+        self._paste(b"a\r\nb")
+        _wait_draft(il, "a\nb")
+        os.write(self.w, b"\r")
+        self.assertEqual(il.pop(), "a\nb")
         il.close()
 
 

@@ -55,36 +55,8 @@ _PASTE_CONFIRM_BYTES = 4096   # 大块粘贴确认阈值（与 detect_paste 同�
 
 
 def _char_width(c: str) -> int:
-    """终端显示列宽（CJK 全角占 2 列），光标定位/截断用。"""
+    """终端显示列宽（CJK 全角占 2 列）；main.py re-export（门禁兼容）。"""
     return 2 if unicodedata.east_asian_width(c) in ("W", "F") else 1
-
-
-def _disp_width(s: str) -> int:
-    return sum(_char_width(c) for c in s)
-
-
-def _trunc(s: str, w: int) -> str:
-    """按显示列宽截断并垫到整宽（菜单行反显铺满）。"""
-    out: list[str] = []
-    width = 0
-    for ch in s:
-        cw = _char_width(ch)
-        if width + cw > w:
-            break
-        out.append(ch)
-        width += cw
-    return "".join(out) + " " * (w - width)
-
-
-def _pos_at_display_col(text: str, col: int) -> int:
-    """显示列 → 字符下标（SGR 点击定位）。返回第一个起点 ≥ col 的字符。"""
-    width = 0
-    for i, ch in enumerate(text):
-        cw = _char_width(ch)
-        if width + cw > col:
-            return i
-        width += cw
-    return len(text)
 
 
 def detect_paste(n_bytes: int, span_ms: float,
@@ -149,6 +121,7 @@ class InputLayer:
         self._bracket = False        # 括号粘贴区间内（200~ … 201~）
         self._paste_buf = bytearray()
         self._burst_pending = False  # 突发判据命中，回车时确认
+        self._edit_pending = False   # 突发流内合并重绘：chunk 收尾统一 after_edit
         self._last_chunk_at = time.monotonic()
         self._burst_bytes = 0
         self._burst_start = 0.0
@@ -258,12 +231,20 @@ class InputLayer:
         """任意编辑后的统一收口：帧提示符带重绘（busy 实时回显）+ 菜单过滤。"""
         self._frame.input_changed(self._buf.text, self._buf.pos)
         t = self._buf.text
-        if t.startswith("/") and " " not in t:
+        if t.startswith("/") and " " not in t and "\n" not in t:
             self._menu_filter()
         elif self._menu is not None:
             self._menu_close()
 
     def _insert_text(self, text: str) -> None:
+        """粘贴/注入统一入口：换行规范化 + 制表展开后逐字符插入。
+
+        draft 不变量：可含 \\n（多行草稿，帧渲染换行感知）；绝不含
+        \\r/\\t——终端对二者执行回车/制表跳，而 cell_len 宽 0，宽度模型
+        失配 → 渲染错位（2026-08-17 雅宁实测「粘贴多行→第二行消失→
+        按键→终端全崩」的根因）。
+        """
+        text = text.replace("\r\n", "\n").replace("\r", "\n").replace("\t", "    ")
         for ch in text:
             self._buf.insert(ch)
         self._after_edit()
@@ -390,9 +371,10 @@ class InputLayer:
                 return
         if not (top <= cy <= top + pr - 1):
             return                      # 面板/活动条行：忽略
-        w = self._tio.width
-        col_in = (cy - top) * w + (cx - 1) - _disp_width(self._prompt)
-        self._buf.move_to(_pos_at_display_col(self._buf.text, max(0, col_in)))
+        idx = fr.click_to_draft(cy - top, cx - 1)
+        if idx is None:
+            return
+        self._buf.move_to(max(0, idx))
         self._frame.input_changed(self._buf.text, self._buf.pos)
 
     # ------------------------------------------------------------ 提交
@@ -492,6 +474,11 @@ class InputLayer:
                 for b in chunk:
                     if self._handle(bytes([b])):
                         return  # EOF 路径：直接收线程（finally 还原 termios）
+                if self._edit_pending:
+                    # 突发流合并重绘：整个 chunk 只做一次 after_edit
+                    # （5000 字符粘贴 = ~78 次 O(n) 重绘，替代 5000 次）
+                    self._edit_pending = False
+                    self._after_edit()
         finally:
             self._w(b"\x1b[?1000l\x1b[?1006l\x1b[?2004l")
             if self._old_termios is not None:
@@ -615,6 +602,13 @@ class InputLayer:
         # 其余 CSI：忽略，不误吞
 
     def _handle_plain(self, b: bytes) -> bool:
+        # 突发流合并重绘的收口：控制键（回车/退格/Tab/Esc 等）前结算已缓
+        # 编辑——菜单过滤/提交依赖草稿最新状态（Enter 选中即执行、Tab
+        # 补全菜单都要求 _menu 已按草稿过滤）。可见字符继续缓存合并，
+        # chunk 收尾由 _run 统一重绘（粘贴性能不回归）。
+        if self._edit_pending and (b < b" " or b == b"\x7f"):
+            self._edit_pending = False
+            self._after_edit()
         if b == b"\x14":  # Ctrl+T 折叠
             if self._busy and self._event_sink is not None:
                 self._event_sink(("toggle_thinking",))
@@ -665,7 +659,8 @@ class InputLayer:
                         self._buf.replace(filled)
                         self._after_edit()
                         return False
-                self._buf.insert("\t")
+                # 字面 Tab 不进草稿：终端制表跳与宽度模型失配（见 _insert_text）
+                self._buf.insert("    ")
                 self._after_edit()
         elif b == b"\x1b":  # Esc 键（经冲刷路径）：关面板 > 关菜单
             if self._frame.panel_open:
@@ -678,7 +673,11 @@ class InputLayer:
             text = self._dec.decode(b)
             for ch in text:
                 self._buf.insert(ch)
-            self._after_edit()
+            # 突发流（粘贴/批输入）内不逐字节重绘：chunk 收尾由 _run 统一
+            # after_edit。逐字节全量布局 × 5000 字符 = O(n³) 挂死输入线程
+            # （2026-08-17 faulthandler 实证：主线程等提交，输入线程死在
+            # _prompt_layout）。单键输入无差别——单字节 chunk 立即收尾。
+            self._edit_pending = True
         return False
 
     def _modal_read(self, prompt: str) -> str:

@@ -47,8 +47,10 @@ def _looks_like_slash(text: str) -> bool:
     """本地复刻 cli.py:4120 路径防护：行首 / 且首词内不再含 /。
 
     "/tmp/x" 是文件路径不是命令；"/resume foo" 才是命令。
+    多行输入一律不是命令——粘贴的多行里首行 / 是内容（路径/代码）
+    的概率远高于命令（2026-08-17 多行草稿支持）。
     """
-    if not text.startswith("/"):
+    if not text.startswith("/") or "\n" in text:
         return False
     first = text.split(None, 1)[0] if text.split() else text
     return "/" not in first[1:]
@@ -58,9 +60,10 @@ def parse_input(text: str):
     """三分流：("bang", cmd) / ("command", name, args) / ("prompt", text)。
 
     name 是剥掉前导 / 的裸名（注册表键即裸名，别名 h/r/? 按此命中）。
+    多行输入整体走 prompt（首行是 ! 也算内容，命令必须单行）。
     """
     from hermes_cli.bang_shell import is_bang_command, parse_bang_command
-    if is_bang_command(text):
+    if "\n" not in text and is_bang_command(text):
         return "bang", parse_bang_command(text)
     if _looks_like_slash(text):
         parts = text.split(None, 1)
@@ -72,8 +75,9 @@ def parse_input(text: str):
 
 def menu_items(draft: str) -> list[tuple[str, str]]:
     """斜杠面板候选（D011）：draft 以 / 开头且无空格时，返回匹配的
-    [(规范名, 说明)]。前缀过滤（"" 前缀 = 全部），只列规范名不含别名。"""
-    if not draft.startswith("/") or " " in draft:
+    [(规范名, 说明)]。前缀过滤（"" 前缀 = 全部），只列规范名不含别名。
+    多行草稿不触发（\\n 视同空格：第二行之后不是命令名）。"""
+    if not draft.startswith("/") or " " in draft or "\n" in draft:
         return []
     want = draft[1:].lower()
     out = []
@@ -91,8 +95,8 @@ def complete(draft: str) -> str | None:
 
     返回完整替换（含前导 /）——InputLayer._replace_draft 整行替换。
     """
-    if not draft.startswith("/"):
-        return None
+    if not draft.startswith("/") or "\n" in draft:
+        return None   # 多行草稿不补全（第二行之后不是命令名）
     want = draft[1:].lower()   # 裸名前缀
     names = sorted({n for n in _COMMANDS if n.startswith(want)})
     if not names:

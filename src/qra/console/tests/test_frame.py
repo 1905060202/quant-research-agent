@@ -23,6 +23,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 from qra.console.frame import Frame  # noqa: E402
 from qra.console.renderer import TurnRenderer  # noqa: E402
 from qra.console.termio import TermIO  # noqa: E402
+from rich.cells import cell_len  # noqa: E402
 
 
 class _State:
@@ -166,7 +167,8 @@ def _setup(width: int = 80, height: int = 24):
     os.environ["COLUMNS"] = str(width)
     os.environ["LINES"] = str(height)
     screen = _Screen(width, height)
-    tio = TermIO(file=screen)
+    # 显式注入尺寸（_term_size 有 ≥20 钳制，窄屏测试走不了 env）
+    tio = TermIO(file=screen, width=width, height=height)
     r = TurnRenderer(tio, _State())
     fr = Frame(tio, prompt="❯ ")
     fr.offset_provider = r.offset
@@ -302,6 +304,120 @@ class FrameClickTests(_Env):
         r.tool_complete("t1", "qra_quote", {}, "x", True)
         self.assertFalse(r.click(24, 3))   # 帧行（提示符），不属内容
         self.assertTrue(r.blocks[0].collapsed)
+
+
+class MultilineFrameTests(_Env):
+    """多行草稿渲染回归锁（2026-08-17 崩溃修复）。
+
+    根因：草稿含 \\n 时按单行宽度模型渲染，行文本含真换行 → 终端错位
+    → 按键重绘加剧 → 终端模拟器崩溃。修复后帧按硬换行 + 折行展开，
+    每行文本是终端安全片段，光标/点击映射换行感知。
+    """
+
+    def test_multiline_draft_renders_two_rows(self):
+        screen, tio, r, fr = _setup(80, 24)
+        fr.input_changed("a\nb", 3)
+        top = fr._frame_top()
+        self.assertEqual(fr._prompt_rows(), 2)
+        self.assertEqual(screen.line(top), "❯ a")
+        self.assertEqual(screen.line(top + 1), "b")
+        # 光标落第二行行尾（b 之后）
+        self.assertEqual(tio.cursor_pos, (top + 1, 2))
+
+    def test_multiline_empty_middle_line(self):
+        screen, tio, r, fr = _setup(80, 24)
+        fr.input_changed("a\n\nb", 4)
+        top = fr._frame_top()
+        self.assertEqual(fr._prompt_rows(), 3)
+        self.assertEqual(screen.line(top), "❯ a")
+        self.assertEqual(screen.line(top + 1), "")
+        self.assertEqual(screen.line(top + 2), "b")
+        self.assertEqual(tio.cursor_pos, (top + 2, 2))
+
+    def test_multiline_segment_wraps(self):
+        # 宽 6：'❯ ' 2 列 + 'abcd' = 满行，'efg' 续行，'x' 再续（❯ 宽 1）
+        screen, tio, r, fr = _setup(6, 24)
+        fr.input_changed("abcdefg\nx", 9)
+        top = fr._frame_top()
+        rows = fr._prompt_layout()
+        self.assertEqual([x[0] for x in rows], ["❯ abcd", "efg", "x"])
+        self.assertEqual(screen.line(top), "❯ abcd")
+        self.assertEqual(screen.line(top + 1), "efg")
+        self.assertEqual(screen.line(top + 2), "x")
+        self.assertEqual(tio.cursor_pos, (top + 2, 2))
+
+    def test_wide_char_rows_never_exceed_terminal_width(self):
+        # 宽 3 终端：❯+空格 = 2 列，剩 1 列装不下 2 列宽的中字 → 每行一个
+        # 中字。旧窗口算法行界切进宽字中间会产出 "中中"（4 列 > 3 列行宽），
+        # 真终端对超宽行二次折行 → 光标/帧错位（与多行崩溃同源病根）。
+        screen, tio, _, fr = _setup(3, 24)
+        fr.input_changed("中中中", 3)
+        top = fr._frame_top()
+        self.assertEqual([x[0] for x in fr._prompt_layout()],
+                         ["❯ ", "中", "中", "中"])
+        self.assertEqual(screen.line(top), "❯")       # rstrip 裁尾部空格
+        self.assertEqual(screen.line(top + 1), "中")
+        self.assertEqual(screen.line(top + 2), "中")
+        self.assertEqual(screen.line(top + 3), "中")
+        self.assertEqual(tio.cursor_pos, (top + 3, 3))
+
+    def test_layout_rows_never_exceed_width(self):
+        # 行宽不变量锁：任意草稿（宽字符/硬换行/窄屏）下每行显示宽 ≤ 终端宽
+        for w in (3, 5, 8, 12, 20):
+            _, tio, _, fr = _setup(w, 24)
+            for draft in ("中中中中中", "a\n中中\nbcd", "中\n中\n中",
+                          "x" * 50, "中" * 30, "ab中cd中ef\ngh中"):
+                fr.input_changed(draft, len(draft))
+                for text, _s, _e in fr._prompt_layout():
+                    self.assertLessEqual(cell_len(text), w,
+                                         f"宽 {w} 行文本超宽: {text!r}")
+
+    def test_layout_rows_never_contain_controls(self):
+        # 不变量锁：帧画出的每一行都是终端安全片段（无 \n \r \t）
+        _, _, _, fr = _setup(40, 24)
+        for draft in ("a\nb", "a\n\nb", "abcdefghijk\nxy", "a\n" * 3 + "z"):
+            fr.input_changed(draft, len(draft))
+            for text, _s, _e in fr._prompt_layout():
+                self.assertNotIn("\n", text)
+                self.assertNotIn("\r", text)
+                self.assertNotIn("\t", text)
+
+    def test_cursor_between_lines(self):
+        _, tio, _, fr = _setup(80, 24)
+        fr.input_changed("ab\ncd", 2)   # 光标在 ab 之后（\n 之前）
+        top = fr._frame_top()
+        self.assertEqual(tio.cursor_pos, (top, 5))   # '❯ ab' = 4 列 → col 5
+
+    def test_cursor_full_row_falls_to_next_line(self):
+        # 光标恰在满行行尾（col == 行宽）：落下一行行首，避开 pending-wrap
+        _, tio, _, fr = _setup(6, 24)
+        fr.input_changed("abcdefg\nx", 4)   # 光标在 abcd 后 → '❯ abcd' 满行 6 列
+        top = fr._frame_top()
+        # pos=6 命中行 0（s=0 e=6）→ col = cell_len('❯ abcd') = 6 >= 6 → 折下行行首
+        self.assertEqual(tio.cursor_pos, (top + 1, 1))
+
+    def test_submit_clears_multiline_back_to_single_row(self):
+        screen, tio, r, fr = _setup(80, 24)
+        fr.input_changed("a\nb", 3)
+        top = fr._frame_top()
+        self.assertEqual(fr._prompt_rows(), 2)
+        fr.input_changed("", 0)          # 提交后清空
+        top2 = fr._frame_top()           # 帧变矮，顶部下移一行
+        self.assertEqual(fr._prompt_rows(), 1)
+        self.assertEqual(screen.line(top2), "❯")
+        self.assertEqual(screen.line(top2 - 1), "")   # 旧行被区域扩张擦除
+        self.assertEqual(screen.line(top2 + 1), "")
+
+    def test_click_to_draft_maps_rows_and_cols(self):
+        _, _, _, fr = _setup(80, 24)
+        fr.input_changed("ab\ncd", 5)
+        self.assertEqual(fr.click_to_draft(0, 0), 0)    # '❯' 起点 → draft 0
+        self.assertEqual(fr.click_to_draft(0, 3), 1)    # 点在 b 上 → draft 1
+        self.assertEqual(fr.click_to_draft(0, 4), 2)    # 行尾后 → ab 之后
+        self.assertEqual(fr.click_to_draft(1, 0), 3)    # 第二行 c 之前
+        self.assertEqual(fr.click_to_draft(1, 1), 4)    # 点在 d 上 → 行尾
+        self.assertEqual(fr.click_to_draft(1, 99), 5)   # 超右端钳行尾 = draft 长 5
+        self.assertIsNone(fr.click_to_draft(2, 0))      # 行超界 → None
 
 
 class FrameActivityTests(_Env):

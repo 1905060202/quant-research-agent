@@ -58,6 +58,15 @@ class ParseInputTests(unittest.TestCase):
         self.assertEqual(
             commands.parse_input("fix the bug!"), ("prompt", "fix the bug!"))
 
+    def test_multiline_slash_is_prompt(self):
+        # 多行粘贴首行是 / 也算内容（2026-08-17 多行草稿：命令必须单行）
+        self.assertEqual(
+            commands.parse_input("/resume\n继续干"), ("prompt", "/resume\n继续干"))
+
+    def test_multiline_bang_is_prompt(self):
+        self.assertEqual(
+            commands.parse_input("!ls\nx"), ("prompt", "!ls\nx"))
+
 
 class PathGuardTests(unittest.TestCase):
     def test_absolute_path_is_prompt(self):
@@ -114,8 +123,22 @@ class CompleteTests(unittest.TestCase):
         self.assertIsNone(commands.complete("res"))
         self.assertIsNone(commands.complete("ab"))
 
+    def test_multiline_returns_none(self):
+        # 多行草稿不补全（第二行之后不是命令名）
+        self.assertIsNone(commands.complete("/res\n继续"))
+
     def test_uppercase_input_matches(self):
         self.assertEqual(commands.complete("/RES"), "/resume ")
+
+
+class MenuItemsTests(unittest.TestCase):
+    def test_slash_prefix_matches(self):
+        names = [n for n, _ in commands.menu_items("/res")]
+        self.assertIn("resume", names)
+
+    def test_multiline_returns_empty(self):
+        # 多行草稿不弹斜杠菜单（\\n 视同空格）
+        self.assertEqual(commands.menu_items("/res\n继续"), [])
 
 
 class DispatchTests(unittest.TestCase):
