@@ -483,3 +483,99 @@ def cmd_yolo(ctx, args: str) -> None:
                 pass
         sess.yolo = True
         _say(ctx, "  ⚡ YOLO 已开启 — 所有命令自动放行，请谨慎使用。")
+
+
+def cmd_fold(ctx, args: str) -> None:
+    """D011 折叠块键盘回退：/fold 列块表，/fold <n> 切换（鼠标点击等效）。"""
+    renderer = getattr(ctx, "renderer", None)
+    if renderer is None:
+        _say(ctx, "  （折叠渲染器不可用）")
+        return
+    arg = args.strip()
+    if arg:
+        if not arg.isdigit():
+            _say(ctx, "  用法：/fold [序号]——无参列块表，带序号切换折叠")
+            return
+        if renderer.toggle_block(int(arg)):
+            _say(ctx, f"  已切换块 {arg} 折叠态")
+        else:
+            _say(ctx, f"  块 {arg} 不存在或不可折叠（/fold 无参看列表）")
+        return
+    items = renderer.fold_list()
+    if not items:
+        _say(ctx, "  （没有可折叠的块——工具调用会自动折叠为一行，"
+                  "点击该行或 /fold <n> 展开）")
+        return
+    for i, icon, summary, collapsed in items:
+        mark = "▸ 折叠" if collapsed else "▾ 展开"
+        _say(ctx, f"  {i:>2}. {icon} {summary[:56]}  {mark}")
+    _say(ctx, "  /fold <n> 切换；直接鼠标点击折叠行同样有效")
+
+
+def cmd_agents(ctx, args: str) -> None:
+    """D011 subagent 可见性：本进程子代理注册表快照。
+
+    agent.subagent_lifecycle._REGISTRY.records（模块级，同进程 delegate_task/
+    spawn 类子代理：state/started_at/completed_at/handle）。qra_python 内核侧
+    子代理在 qra.run 回执与内核会话内可见，console 侧如实提示。
+    """
+    try:
+        from agent.subagent_lifecycle import _REGISTRY
+    except Exception:
+        _say(ctx, "  （子代理注册表不可用）")
+        return
+    with _REGISTRY.lock:
+        items = list(_REGISTRY.records.items())
+    if not items:
+        _say(ctx, "  （本进程尚无子代理记录——delegate_task / qra.run 子代理运行后可见）")
+        return
+    now = time.time()
+    rows = []
+    for subagent_id, rec in items:
+        h = rec.handle
+        state = getattr(rec.state, "value", None) or str(rec.state)
+        dur = ""
+        if rec.started_at:
+            dur = f"{max(0.0, (rec.completed_at or now) - rec.started_at):.0f}s"
+        rows.append({
+            "id": subagent_id, "role": getattr(h, "role", "?"),
+            "cap": getattr(h, "capability", "?"),
+            "model": getattr(h, "model", None) or "—",
+            "state": state, "dur": dur,
+            "mine": getattr(h, "parent_session_id", None) == ctx.sess.session_id,
+        })
+    if ctx.plain:
+        for r in rows:
+            tag = "*" if r["mine"] else " "
+            _say(ctx, f" {tag} [{r['state']}] {r['role']} {r['cap']} "
+                      f"model={r['model']} {r['dur']}  {r['id']}")
+        return
+    from rich.table import Table
+    t = Table(title="子代理（本进程注册表快照，* = 本会话）")
+    t.add_column("", style="bold")
+    t.add_column("状态")
+    t.add_column("角色", style="bold")
+    t.add_column("能力")
+    t.add_column("模型", style="dim")
+    t.add_column("耗时", justify="right")
+    t.add_column("ID", style="dim")
+    for r in rows:
+        t.add_row("*" if r["mine"] else "", r["state"], r["role"],
+                  r["cap"], r["model"], r["dur"], r["id"])
+    ctx.console.print(t)
+    _say(ctx, "  qra_python 内核侧子代理见 qra.run 回执与内核会话的 list_subagents")
+
+
+def cmd_mouse(ctx, args: str) -> None:
+    """/mouse [on|off]：SGR 鼠标捕获开关（默认关，保原生拖选复制/滚轮）。"""
+    want = (args or "").strip().lower()
+    if want not in ("", "on", "off"):
+        _say(ctx, "  用法：/mouse on|off（无参看当前状态）")
+        return
+    enabled = ctx.inp.set_mouse(want == "on") if want else getattr(
+        ctx.inp, "_mouse_on", False)
+    if want:
+        _say(ctx, f"  鼠标捕获 {'开' if enabled else '关'}：点击折叠行展开/收起"
+                  f"{'；原生拖选复制与滚轮被接管（iTerm2 按住 Option 可临时拖选）' if enabled else '，终端原生拖选复制/滚轮恢复'}")
+    else:
+        _say(ctx, f"  鼠标捕获：{'开' if enabled else '关（默认）'} —— /mouse on 启用点击折叠")

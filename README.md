@@ -10,7 +10,7 @@
 
 | 层 | 实现 | 说明 |
 |---|---|---|
-| 终端 | `qra` 入口 + `src/qra/console/` | prime 式 CoT 全展示；12 个 /命令（resume/clear/export/model/yolo/loop…）；! 直达 shell；↑↓历史/Tab 补全/大粘贴确认；deepseek↔opus 双路由 |
+| 终端 | `qra` 入口 + `src/qra/console/` | prime 式 CoT 全展示（无框流式+追加式渲染不重复）；15 个 /命令（resume/clear/export/model/yolo/loop/fold/mouse/agents…，输入 / 即弹菜单，Enter 即执行）；! 直达 shell；←→ 光标编辑/↑↓历史/Tab 补全/大粘贴确认；deepseek↔opus 双路由 |
 | 工具 | `.hermes/plugins/qra/` | qra_quote 新浪实时行情 / qra_signal 猎豹信号摘要（诚实标注数据新鲜度）/ qra_kb_fts 方法论 FTS 检索 / qra_sync 上游同步 |
 | 内核 | `.hermes/plugins/qra_python/` | 会话级 Jupyter 持久内核：变量跨调用存活、dill 快照跨重启复活、死内核自愈；预装 qra_runtime（prime 完全体）——`qra.run` 递归子代理、harness 文件店、agent_message |
 | 记忆 | `.hermes/plugins/qra_memory/` | Mem0 式 ADD 协议：三重去重（会话/精确/近似≥0.85）+ 价格锚放宽 + 叙事链；显式检索回忆 |

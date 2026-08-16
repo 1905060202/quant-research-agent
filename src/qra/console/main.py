@@ -1,32 +1,43 @@
-"""QRA Console — prime 式 CoT 全展示终端（ADR D007 · Phase 1 + P0 命令面）。
+"""QRA Console — prime 式 CoT 全展示终端（D007 Phase 1 + P0 命令面 + D011 追加式渲染）。
 
 机理（见 docs/机理研究_prime与CC逆向_2026-08-14.md）：
-  - CoT 是消息的一等 content block：默认全展开逐 token 流式渲染，Ctrl+T 折叠，
-    折叠态显示 recap（推理中最后一个 **加粗标题**）——prime 原版算法
-  - 工具调用/结果实时块（args 摘要 + 结果预览 + 时长）
+  - CoT 是消息的一等 content block：默认全展开逐 token 流式渲染（无框灰暗），
+    Ctrl+T 折叠，折叠态显示 recap（推理中最后一个 **加粗标题**）——prime 算法
+  - 工具调用默认折叠为一行摘要（⏺ 工具 … ▸），鼠标点击或 /fold 展开全文；
+    delegate_task 类子代理以 ⎇ 子代理 前缀区分
   - footer 显示成本（反 prime 品牌选择：量化场景成本要可见）
   - 多轮交互：同一 AIAgent 实例 + SessionState.history 续聊
 
 P0 命令面（CC/prime/hermes 原生功能对齐，2026-08-16）：
-  - / 命令：help/resume/sessions/clear/compact/export/model/yolo/usage/status/memory/loop
+  - / 命令：help/resume/sessions/clear/compact/export/model/yolo/usage/status/
+    memory/loop/fold/agents；输入 / 即弹候选面板（↑↓ 选择、Tab 补全、Esc 关闭）
   - ! 直达 shell（vendor bang_shell：同 terminal 工具同门审批，输出不进上下文）
   - ↑↓ 历史 / Tab 补全 / 大块粘贴确认 / 双路由切换（deepseek ↔ opus@8789）
+  - ←→/Home/End 光标编辑 + 鼠标点击定位光标（LineBuffer 行编辑，D011 v2 P0）
   - /loop 自动继续（CC 对齐，进程内调度器：每轮自动同 prompt 重跑，Ctrl+C 退出）
+
+D011 追加式渲染（2026-08-16 雅宁实测修复）：
+  - 已定型内容只 print 一次（自然滚动 + 消灭 rich Live 全帧重绘的重复输出）
+  - spinner 呼吸反馈：等首 token / 工具执行中一行原地心跳
+  - 单一写入者 TermIO：渲染帧 / spinner / 输入回显 / 菜单 / 提示符全部串行
+    经同一把锁写出——「输出时打字终端崩」根因修复（两个不同步 tty 写入者
+    的字节插进转义序列中间，终端模拟器 CSI 状态机卡死）
+  - 回合中输入回显静音，按键进 LineBuffer 缓冲，回合结束一次补画
 
 架构（零 vendor 改动）：
   导入 run_agent.AIAgent（hermes 根模块公开类，oneshot/tui_gateway 同款先例），
   注入 reasoning_callback / stream_delta_callback / 工具回调，显示层 100% 接管。
   核心循环、provider、持久化全部复用 vendor。
   InputLayer 迁至 qra.console.input_layer（本模块 re-export 保测试门禁路径），
-  命令注册/分发在 qra.console.commands，处理器在 qra.console.handlers。
+  命令注册/分发在 qra.console.commands，处理器在 qra.console.handlers，
+  渲染在 qra.console.renderer（行账本折叠），终端低层在 qra.console.termio。
 
-回调线程 → 事件队列 → 渲染线程（每次 drain 后一帧 reconcile，prime pi-tui 同款思路）。
+回调线程 → 事件队列 → 渲染线程（每次 drain 后即渲染，prime pi-tui 同款思路）。
 """
 
 from __future__ import annotations
 
 import argparse
-import json
 import logging
 import os
 import queue
@@ -34,12 +45,7 @@ import sys
 import threading
 import time
 
-from rich import box
-from rich.console import Console, Group
-from rich.live import Live
-from rich.markdown import Markdown
-from rich.panel import Panel
-from rich.text import Text
+from rich.console import Console
 
 # 入口自举：脚本入口是 `python -m src.qra.console.main`（包根在 CWD），
 # qra.* 顶层导入需要 src/ 在 sys.path 上。vendor 顶层模块靠 editable 安装
@@ -49,150 +55,59 @@ _src_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__fi
 if _src_root not in sys.path:
     sys.path.insert(0, _src_root)
 
-# InputLayer/_char_width 从 input_layer.py 迁出后 re-export：
+# InputLayer/_char_width/detect_paste 从 input_layer.py 迁出后 re-export：
 # test_inputlayer.py 依赖 qra.console.main 此路径（门禁兼容，不破不改）
 from qra.console.input_layer import InputLayer, _char_width, detect_paste  # noqa: F401
-from qra.console.session_state import PRICE_USD, USD_CNY
-
-# 工具结果预览上限（字符），超出截断并注明
-_RESULT_PREVIEW_MAX = 3000
+from qra.console.renderer import TurnRenderer
+from qra.console.termio import TermIO
 
 
 # ---------------------------------------------------------------- 状态与事件
 
 class TurnState:
-    """一轮对话的显示状态（仅渲染线程读写）。"""
+    """一轮对话的显示状态（渲染线程读写，主线程只读 dirty）。"""
 
     def __init__(self, fold_thinking: bool) -> None:
-        self.blocks: list[dict] = []      # 时间序块：thinking / text / tool
+        self.blocks: list[dict] = []      # 时间序块：thinking / text（诊断用）
         self.statuses: list[str] = []     # 最近 3 条生命周期/警告
         self.show_thinking = not fold_thinking  # Ctrl+T 切换
-        self.dirty = True
+        self.dirty = False
+        # D011 流式闭合跟踪（apply 内部状态）
+        self.thinking_open = False
+        self.thinking_started = 0.0
+        self.text_open = False
+        self.has_text = False             # 本轮是否已流式输出文本
+        self.model = ""                   # footer 用
 
 
-def _thinking_recap(text: str) -> str:
-    """prime 的折叠摘要算法：取推理中最后一个 **加粗标题**。"""
-    last = None
-    idx = 0
-    while True:
-        idx = text.find("**", idx)
-        if idx == -1:
-            break
-        end = text.find("**", idx + 2)
-        if end != -1:
-            last = text[idx + 2 : end].strip()
-            idx = end + 2
-        else:
-            break
-    return last or "思考中…"
+def _log_turn_error(exc: Exception) -> None:
+    """回合异常落盘（终端可能已假死/无法复制——日志文件是唯一可靠现场）。
 
-
-def render(state: TurnState, usage: dict | None, model: str) -> Group:
-    parts: list = []
-    for blk in state.blocks:
-        if blk["kind"] == "thinking":
-            if state.show_thinking:
-                style = "grey62"
-                content: object = Markdown(blk["text"], style=style)
-                # Claude Code 式思考提示：标题带计时（"思考 3s"）
-                if blk.get("open"):
-                    elapsed = time.time() - blk.get("started", time.time())
-                    title = f"✻ 思考 {elapsed:.0f}s"
-                else:
-                    title = "✻ 思考"
-                parts.append(
-                    Panel(content, border_style=style, box=box.ROUNDED,
-                          title=title, title_align="left", padding=(0, 1))
-                )
-            else:
-                parts.append(Text(f"✻ 思考 · {_thinking_recap(blk['text'])}",
-                                  style="grey62"))
-        elif blk["kind"] == "text":
-            parts.append(Markdown(blk["text"]))
-        elif blk["kind"] == "tool":
-            _render_tool_block(parts, blk)
-    if state.statuses:
-        for line in state.statuses[-3:]:
-            parts.append(Text(f"  · {line}", style="dim yellow"))
-    if usage:
-        parts.append(_render_usage(usage, model))
-    if not parts:
-        # 首 token 前的等待帧：发问后立刻有反馈，杜绝"一片空白"
-        frames = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
-        f = frames[int(time.time() * 8) % len(frames)]
-        parts.append(Text(f"{f} 思考中…", style="dim"))
-    return Group(*parts)
-
-
-def _render_tool_block(parts: list, blk: dict) -> None:
-    """Claude Code 式工具块：⏺ 名称 + args 摘要 + 缩进结果预览。
-    delegate_task 是 hermes 的 subagent 委派工具——识别为嵌套子代理面板。"""
-    name = blk["name"]
-    is_subagent = name in ("delegate_task", "spawn_task", "spawn")
-    title = "⎇ 子代理" if is_subagent else "⏺ 工具"
-    if blk.get("status") == "generating":
-        parts.append(Text(f"{title} {name} 参数生成中…", style="cyan"))
-        return
-    if blk.get("status") == "running":
-        inner = Text(f"{name}", style="bold cyan")
-        args = _compact_args(blk.get("args"))
-        if args:
-            inner.append(Text(f"\n  {args}", style="dim"))
-        inner.append(Text("\n  ⠋ 执行中…", style="cyan"))
-        parts.append(Panel(inner, border_style="cyan", box=box.ROUNDED,
-                           title=title, title_align="left", padding=(0, 1)))
-        return
-    # done
-    inner = Text(f"{name}", style="bold cyan")
-    inner.append(Text(f" · {blk.get('duration', 0):.2f}s", style="dim"))
-    args = _compact_args(blk.get("args"))
-    if args:
-        inner.append(Text(f"\n  {args}", style="dim"))
-    result = blk.get("result") or ""
-    if len(result) > _RESULT_PREVIEW_MAX:
-        result = result[:_RESULT_PREVIEW_MAX] + (
-            f"\n…（已截断，共 {len(blk.get('result') or '')} 字符）")
-    if result.strip():
-        # 缩进呈现（CC 式嵌套内容），换行保持缩进
-        indented = "\n  ".join(result.strip().splitlines())
-        inner.append(Text("\n  " + indented, style="grey74"))
-    ok = blk.get("ok", True)
-    parts.append(Panel(
-        inner,
-        border_style="green" if ok else "red",
-        box=box.ROUNDED,
-        title=f"{title} ✓" if ok else f"{title} ✗",
-        title_align="left", padding=(0, 1),
-    ))
-
-
-def _compact_args(args) -> str:
-    if not args:
-        return ""
+    写 HERMES_HOME/logs/console_errors.log，任何失败都静默（兜底自身不能炸）。
+    """
     try:
-        s = json.dumps(args, ensure_ascii=False)
+        import datetime
+        import traceback
+        hermes_home = os.environ.get("HERMES_HOME", os.path.expanduser("~/.hermes"))
+        log_path = os.path.join(hermes_home, "logs", "console_errors.log")
+        os.makedirs(os.path.dirname(log_path), exist_ok=True)
+        with open(log_path, "a", encoding="utf-8") as f:
+            f.write(f"\n=== {datetime.datetime.now():%Y-%m-%d %H:%M:%S} ===\n")
+            traceback.print_exception(type(exc), exc, exc.__traceback__, file=f)
     except Exception:
-        s = str(args)
-    if len(s) > 300:
-        s = s[:300] + "…"
-    return s
+        pass
 
 
-def _render_usage(usage: dict, model: str) -> Text:
-    inp = usage.get("input_tokens") or 0
-    out = usage.get("output_tokens") or 0
-    cache = usage.get("cache_read_tokens") or 0
-    api = usage.get("api_calls") or 0
-    usd = (inp * PRICE_USD["input"] + out * PRICE_USD["output"]
-           + cache * PRICE_USD["cache_read"]) / 1e6
-    t = Text("▸ ", style="bold")
-    t.append(f"{model}", style="bold cyan")
-    t.append(f" · in {inp:,} / out {out:,} / cache读 {cache:,} · {api} 次调用", style="dim")
-    t.append(f" · ≈¥{usd * USD_CNY:.3f}", style="green")
-    return t
+def _result_looks_ok(result: str) -> bool:
+    """工具结果粗判：QRA 工具约定错误以文本形式返回。"""
+    if not result:
+        return True
+    head = result[:200]
+    for marker in ("工具调用失败", "未知工具", "参数错误", "Error", "错误"):
+        if marker in head:
+            return False
+    return True
 
-
-# ---------------------------------------------------------------- 事件管道
 
 def _make_callbacks(events: "queue.Queue", state: TurnState) -> dict:
     """构造注入 AIAgent 的回调。回调来自工作线程：只入队，不改状态。"""
@@ -225,109 +140,112 @@ def _make_callbacks(events: "queue.Queue", state: TurnState) -> dict:
     }
 
 
-def apply(state: TurnState, ev) -> None:
-    """渲染线程：把事件应用到状态（块时间序，prime message 模型同构）。"""
+def apply(state: TurnState, ev, renderer: TurnRenderer) -> None:
+    """渲染线程：把事件应用到状态并增量渲染（追加式，D011）。"""
     kind = ev[0]
     if kind == "reasoning":
-        if not state.blocks or state.blocks[-1]["kind"] != "thinking":
-            state.blocks.append({"kind": "thinking", "text": "", "open": True,
-                                 "started": time.time()})
+        if not state.thinking_open:
+            state.thinking_open = True
+            state.thinking_started = time.time()
+            state.blocks.append({"kind": "thinking", "text": ""})
         state.blocks[-1]["text"] += ev[1]
+        renderer.reasoning(ev[1])
     elif kind == "delta":
         text = ev[1]
         # None = 回合内流结束信号（conversation_loop 约定）
         if text is None:
-            for blk in reversed(state.blocks):
-                if blk["kind"] == "thinking":
-                    blk["open"] = False
-                    break
+            if state.thinking_open:
+                renderer.reasoning_close(time.time() - state.thinking_started)
+                state.thinking_open = False
+            if state.text_open:
+                renderer.text_close()
+                state.text_open = False
             return
-        if not state.blocks or state.blocks[-1]["kind"] != "text":
+        state.has_text = True
+        if not state.text_open:
+            state.text_open = True
             state.blocks.append({"kind": "text", "text": ""})
         state.blocks[-1]["text"] += text
+        renderer.text_delta(text)
     elif kind == "tool_gen":
-        state.blocks.append(
-            {"kind": "tool", "name": ev[1], "status": "generating",
-             "started": time.time(), "ok": True})
+        state.statuses.append(f"[工具] {ev[1]} 参数生成中…")
+        renderer.status(f"{ev[1]} 参数生成中…")
     elif kind == "tool_start":
         _, tool_call_id, name, args = ev
-        _close_thinking(state)
-        state.blocks.append(
-            {"kind": "tool", "id": tool_call_id, "name": name, "args": args,
-             "status": "running", "started": time.time(), "ok": True})
+        if state.thinking_open:
+            renderer.reasoning_close(time.time() - state.thinking_started)
+            state.thinking_open = False
+        renderer.tool_start(tool_call_id, name, args)
     elif kind == "tool_complete":
         _, tool_call_id, name, args, result = ev
-        _close_thinking(state)
-        for blk in reversed(state.blocks):
-            if blk["kind"] == "tool" and blk.get("id") == tool_call_id:
-                blk["status"] = "done"
-                blk["result"] = str(result) if result else ""
-                blk["duration"] = time.time() - blk["started"]
-                blk["ok"] = _result_looks_ok(str(result or ""))
-                return
-        state.blocks.append(
-            {"kind": "tool", "id": tool_call_id, "name": name, "args": args,
-             "status": "done", "result": str(result or ""),
-             "duration": 0.0, "started": time.time(), "ok": True})
+        if state.thinking_open:
+            renderer.reasoning_close(time.time() - state.thinking_started)
+            state.thinking_open = False
+        text_result = str(result) if result else ""
+        renderer.tool_complete(tool_call_id, name, args, text_result,
+                               _result_looks_ok(text_result))
     elif kind == "status":
         state.statuses.append(f"[{ev[1]}] {ev[2]}")
-
-
-def _close_thinking(state: TurnState) -> None:
-    for blk in reversed(state.blocks):
-        if blk["kind"] == "thinking":
-            blk["open"] = False
-            break
-
-
-def _result_looks_ok(result: str) -> bool:
-    """工具结果粗判：QRA 工具约定错误以文本形式返回。"""
-    if not result:
-        return True
-    head = result[:200]
-    for marker in ("工具调用失败", "未知工具", "参数错误", "Error", "错误"):
-        if marker in head:
-            return False
-    return True
+        renderer.status(f"[{ev[1]}] {ev[2]}")
+    elif kind == "turn_end":
+        result = ev[1]
+        usage = None
+        if isinstance(result, dict) and result.get("input_tokens"):
+            usage = result
+        renderer.finish(usage, state.model)
+    elif kind == "click":
+        _, cy, cx = ev
+        renderer.click(cy, cx)
+    elif kind == "toggle_thinking":
+        renderer.toggle_thinking()
 
 
 # ---------------------------------------------------------------- 渲染循环
 
-def _render_loop(events: "queue.Queue", state: TurnState, live: Live,
-                 result_holder: dict) -> None:
-    """消费事件，drain 后一帧 reconcile（prime pi-tui 同款节流）。"""
-    # 事件到达时间戳 trace（QRA_EVENT_TRACE=1 时写 /tmp/qra_event_trace.txt，
-    # 诊断流式节奏用：判断上游是逐 delta 实时到达还是攒批一次性到达）
+def _render_loop(events: "queue.Queue", state: TurnState,
+                 renderer: TurnRenderer) -> None:
+    """消费事件并增量渲染；空闲心跳驱动 spinner（呼吸反馈）。
+
+    事件到达时间戳 trace（QRA_EVENT_TRACE=1 时写 /tmp/qra_event_trace.txt，
+    诊断流式节奏用：判断上游是逐 delta 实时到达还是攒批一次性到达）。
+    """
     trace = [] if os.getenv("QRA_EVENT_TRACE") else None
     trace_t0 = time.time()
     while True:
         try:
-            ev = events.get(timeout=0.25)
+            ev = events.get(timeout=0.1)
         except queue.Empty:
-            # 无事件时只刷新等待帧（spinner 动画）；有内容后不空转
-            if not state.blocks and not state.statuses:
-                live.update(render(state, None, result_holder["model"]))
+            renderer.tick()
             continue
         if ev[0] == "sentinel":
             break
-        if trace is not None:
-            trace.append(f"{time.time() - trace_t0:7.2f}s  {ev[0]}"
-                         f"{' ' + str(ev[1])[:60] if len(ev) > 1 else ''}")
-        apply(state, ev)
-        done = False
-        # 排空已到事件，一次渲染
+        # 排空已到事件，逐条增量渲染
         while True:
+            if trace is not None:
+                trace.append(f"{time.time() - trace_t0:7.2f}s  {ev[0]}"
+                             f"{' ' + str(ev[1])[:60] if len(ev) > 1 else ''}")
+            if ev[0] == "sentinel":
+                break
             try:
-                nxt = events.get_nowait()
+                apply(state, ev, renderer)
+            except Exception:
+                # 渲染异常不杀渲染线程：否则事件无人消费，输入层一直
+                # 静音，console 假死（2026-08-16「戳错误后无法运行」）
+                logging.exception("console render apply failed")
+                try:
+                    renderer.emergency_note(f"渲染异常：{ev[0]}")
+                except Exception:
+                    pass
+            try:
+                ev = events.get_nowait()
             except queue.Empty:
                 break
-            if nxt[0] == "sentinel":
-                done = True
-                break
-            apply(state, nxt)
-        live.update(render(state, None, result_holder["model"]))
-        if done or ev[0] == "turn_end":
+        if ev[0] == "sentinel":
             break
+        try:
+            renderer.tick()
+        except Exception:
+            logging.exception("console render tick failed")
     if trace is not None:
         try:
             with open("/tmp/qra_event_trace.txt", "w", encoding="utf-8") as f:
@@ -507,11 +425,11 @@ def cleanup(agent, session_db) -> None:
 # ---------------------------------------------------------------- 单轮执行
 
 def run_turn(agent, session_db, events, state, prompt: str,
-             conversation_history, console: Console, plain: bool) -> dict:
-    """执行一轮：Live 渲染 + 回调采集；plain 模式不渲染只回结果。"""
+             conversation_history, tio: TermIO, renderer: TurnRenderer,
+             plain: bool) -> dict:
+    """执行一轮：追加式渲染 + 回调采集；plain 模式不渲染只回结果。"""
     logging.disable(logging.CRITICAL)  # 静默 stdlib logger（文件 handler 不受影响）
 
-    result_holder = {"model": getattr(agent, "model", "") or ""}
     if plain:
         result = agent.run_conversation(prompt, conversation_history=conversation_history)
         return result
@@ -520,55 +438,45 @@ def run_turn(agent, session_db, events, state, prompt: str,
     from contextlib import redirect_stderr, redirect_stdout
 
     buf_out, buf_err = io.StringIO(), io.StringIO()
-    # 渲染必须绑定此刻的真实 stdout：run_conversation 期间 redirect_stdout
-    # 会把 sys.stdout 换成 StringIO（捕获工具打印防撕裂），而 rich Console
-    # 无 file 参数时动态跟随 sys.stdout——渲染帧会被吞进缓冲区，表现为
-    # 整轮屏幕空白、结束后内容一次性涌出。显式绑定后 redirect 不影响渲染。
-    render_console = Console(file=sys.stdout)
-    live = Live(render(state, None, result_holder["model"]), console=render_console,
-                refresh_per_second=20, vertical_overflow="visible")
-    live.start()
-    renderer = threading.Thread(
-        target=_render_loop, args=(events, state, live, result_holder),
+    # 渲染经 TermIO 写出：构造时刻已绑定真实 stdout 文件对象，回合内
+    # redirect_stdout（捕获工具打印防撕裂）不影响它（D011 单一写入者约定）。
+    state.model = getattr(agent, "model", "") or ""
+    renderer.begin()
+    render_thread = threading.Thread(
+        target=_render_loop, args=(events, state, renderer),
         daemon=True, name="qra-console-render")
-    renderer.start()
+    render_thread.start()
 
     result: dict = {}
     failure = None
     try:
-        # 捕获 agent 执行树里的 stdout/stderr（工具打印等），不让其撕裂 Live
+        # 捕获 agent 执行树里的 stdout/stderr（工具打印等），渲染不受影响
         with redirect_stdout(buf_out), redirect_stderr(buf_err):
             result = agent.run_conversation(
                 prompt, conversation_history=conversation_history)
     except BaseException as exc:  # noqa: BLE001
         failure = exc
     finally:
-        # 流结束 → 收尾状态 → 渲染终帧 → 关闭渲染
+        # 流结束 → 兜底文本（流式未覆盖时）→ 收尾 → 关闭渲染线程
+        if failure is None:
+            if not state.has_text:
+                final = result.get("final_response") or ""
+                if final.strip():
+                    events.put(("delta", final))
+                    events.put(("delta", None))
         events.put(("delta", None))
         events.put(("turn_end", result))
         events.put(("sentinel", None))
-        renderer.join(timeout=5)
-        if failure is None:
-            # 流式未覆盖时兜底：把 final_response 作为文本块显示
-            if not any(b["kind"] == "text" and b["text"].strip()
-                       for b in state.blocks):
-                final = result.get("final_response") or ""
-                if final.strip():
-                    state.blocks.append({"kind": "text", "text": final})
-            # 终帧必须在 live.stop() 之前 update——stop 后 update 不再渲染，
-            # 此前 footer 因此从未出现（pty 捕获实证）
-            live.update(render(state, result, result_holder["model"]))
-        live.stop()
+        render_thread.join(timeout=5)
 
     captured_err = buf_err.getvalue().strip()
     if captured_err:
-        console.print(Text("stderr 捕获：", style="bold red") +
-                      Text(captured_err[-2000:], style="red"))
+        tio.print("stderr 捕获：" + captured_err[-2000:], style="red")
 
     if failure is not None:
         if isinstance(failure, (KeyboardInterrupt, SystemExit)):
             raise failure
-        console.print(Text(f"agent 失败：{failure}", style="bold red"))
+        tio.print(f"agent 失败：{failure}", style="bold red")
         return {"final_response": "", "failed": True}
 
     return result
@@ -579,9 +487,10 @@ def run_turn(agent, session_db, events, state, prompt: str,
 def parse_args(argv=None) -> argparse.Namespace:
     p = argparse.ArgumentParser(
         prog="qra console",
-        description="QRA 控制台：prime 式 CoT 全展示（D007 Phase 1 + P0 命令面）",
-        epilog="交互中 /help 看全部命令（/resume /model /yolo /loop /export …）、"
-               " ! 直达 shell、↑↓ 历史、Ctrl+T 折叠思考；空输入或 Ctrl+D 退出。"
+        description="QRA 控制台：prime 式 CoT 全展示（D007 + P0 命令面 + D011 追加式渲染）",
+        epilog="交互中 /help 看全部命令（/resume /model /yolo /loop /fold /agents …）、"
+               " ! 直达 shell、输入 / 弹命令面板（Enter 即执行）、↑↓ 历史、←→ 光标编辑、"
+               " Ctrl+T 折叠思考、/mouse on 开点击展开；空输入或 Ctrl+D 退出。"
                " 输出被管道时自动降级为 plain（只打最终答复）。")
     p.add_argument("-z", "--prompt", help="单发提问（省略则进入多轮交互）")
     p.add_argument("--model", help="模型覆盖（默认 deepseek-v4-pro）")
@@ -598,7 +507,10 @@ def main(argv=None) -> int:
     args = parse_args(argv)
     if args.plain or not sys.stdout.isatty():
         args.plain = True
-    console = Console()
+    plain_console = Console()   # plain 模式输出（无样式码，管道友好）
+    # 单一写入者：构造时刻绑定真实 stdout——渲染/回显/菜单/提示符全经它
+    # 串行写出（「输出时打字终端崩」根因修复，D011）
+    tio = TermIO(sys.stdout)
     # dsh 精华：fail-loud 配置门卫——坏配置当场 exit 2，不带病运行
     from qra.config_guard import guard_config
     guard_config()
@@ -606,6 +518,9 @@ def main(argv=None) -> int:
     agent = session_db = None
     try:
         agent, session_db, events, state, sess = build_agent(args)
+        renderer = TurnRenderer(tio, state)
+        # 命令输出 console 绑定 TermIO 的 file（与渲染同 fd，串行）
+        console = Console(file=tio.file, force_terminal=True, width=tio.width)
 
         def one_turn(prompt: str) -> dict:
             # 自动标题（每会话只试一次；set_auto_title_if_empty 幂等兜底）
@@ -619,14 +534,17 @@ def main(argv=None) -> int:
             # 所以这里传的 history 必须不含本轮消息（CLI 同款约定）。
             state.blocks.clear()
             state.statuses.clear()
+            state.thinking_open = False
+            state.text_open = False
+            state.has_text = False
             result = run_turn(agent, session_db, events, state, prompt,
-                              sess.history, console, args.plain)
+                              sess.history, tio, renderer, args.plain)
             final = result.get("final_response") or ""
             sess.history.append({"role": "user", "content": prompt})
             sess.history.append({"role": "assistant", "content": final})
             if args.plain:
                 if final:
-                    console.print(final)
+                    plain_console.print(final)
             return result
 
         def loop_mode(prompt: str) -> None:
@@ -635,32 +553,35 @@ def main(argv=None) -> int:
             每轮结束 sleep 间隔后自动以同 prompt 重跑；Ctrl+C 在任意时刻
             （回合中/间隔中）打断并退出循环回到提示符。间隔默认 60s，
             QRA_LOOP_INTERVAL 环境变量覆盖（秒，正数）。
-            循环中打字由 InputLayer 后台 reader 缓冲，退出循环后照常回显。
+            循环中打字由 InputLayer 后台 reader 缓冲（回显静音），
+            退出循环后提示符重画时照常显示。
             """
             try:
                 interval = max(1.0, float(os.environ.get("QRA_LOOP_INTERVAL", "60")))
             except ValueError:
                 interval = 60.0
-            console.print(Text(
-                f"⟳ /loop 模式：每 {interval:.0f}s 自动继续「{prompt[:40]}…」"
-                if len(prompt) > 40 else
-                f"⟳ /loop 模式：每 {interval:.0f}s 自动继续「{prompt}」",
-                style="bold cyan"))
-            console.print(Text("  Ctrl+C 退出循环回到提示符", style="dim"))
+            label = prompt[:40] + "…" if len(prompt) > 40 else prompt
+            tio.print(f"⟳ /loop 模式：每 {interval:.0f}s 自动继续「{label}」",
+                      style="bold cyan")
+            tio.print("Ctrl+C 退出循环回到提示符", style="dim")
             n = 0
-            while True:
-                n += 1
-                console.print(Text(f"⟳ 第 {n} 轮", style="bold cyan"))
-                try:
-                    one_turn(prompt)
-                except KeyboardInterrupt:
-                    console.print(Text("(中断本轮，退出循环)", style="yellow"))
-                    return
-                try:
-                    time.sleep(interval)
-                except KeyboardInterrupt:
-                    console.print(Text("(退出循环)", style="yellow"))
-                    return
+            inp.set_busy(True)   # 整个循环静音输入回显
+            try:
+                while True:
+                    n += 1
+                    tio.print(f"⟳ 第 {n} 轮", style="bold cyan")
+                    try:
+                        one_turn(prompt)
+                    except KeyboardInterrupt:
+                        tio.print("(中断本轮，退出循环)", style="yellow")
+                        return
+                    try:
+                        time.sleep(interval)
+                    except KeyboardInterrupt:
+                        tio.print("(退出循环)", style="yellow")
+                        return
+            finally:
+                inp.set_busy(False)
 
         if args.prompt:
             try:
@@ -670,55 +591,68 @@ def main(argv=None) -> int:
             if result.get("failed") and not (result.get("final_response") or "").strip():
                 return 2
             if not (result.get("final_response") or "").strip():
-                console.print("console: 未产生最终答复，视为失败。", style="bold red")
+                plain_console.print("console: 未产生最终答复，视为失败。")
                 return 1
             return 0
 
-        # 多轮交互：会话级输入层（回合中打字不丢失、不回显进重定向缓冲区）
-        console.print(Text("quant-agent · 量化研究智能体", style="bold cyan"))
-        console.print(Text("prime 式 CoT 全展示 · /help 看命令 · ! 直达 shell · "
-                           "Ctrl+T 折叠思考 · 空行退出", style="dim"))
+        # 多轮交互：会话级输入层（回合中打字不丢失、静音缓冲、结束补画）
+        tio.print("quant-agent · 量化研究智能体", style="bold cyan")
+        tio.print("prime 式 CoT 全展示 · /help 看命令 · ! 直达 shell · "
+                  "Ctrl+T 折叠思考 · /mouse on 开点击展开 · 空行退出", style="dim")
         from qra.console import commands
         from qra.console.session_state import CommandContext, ConsoleHistory
 
         inp = InputLayer(state, history=ConsoleHistory(),
-                         completer=commands.complete, prompt="❯ ")
+                         completer=commands.complete, prompt="❯ ",
+                         tio=tio, menu_provider=commands.menu_items)
+        inp.set_event_sink(events.put)   # 回合中鼠标点击/Ctrl+T 直达渲染线程
         ctx = CommandContext(agent=agent, db=session_db, sess=sess,
                              console=console, inp=inp, events=events,
-                             plain=args.plain)
+                             plain=args.plain, renderer=renderer)
         inp.start()
         try:
             while True:
-                console.print(Text("❯ ", style="bold green"), end="")
-                inp.redraw()  # 回合中已有的半行草稿补回显到新提示符后
+                inp.set_content_rows(renderer._row)   # 点击定位基准
+                inp.redraw()   # 提示符 + 草稿 + 光标定位（回合中静音的补画点）
+                if state.dirty:   # 提示符阶段 Ctrl+T：翻折叠 + 区域重印 + 光标复位
+                    state.dirty = False
+                    renderer.toggle_thinking()
+                    inp.redraw()
                 try:
                     user_input = inp.pop()
                 except EOFError:
-                    console.print()
+                    tio.print()
                     break
                 except KeyboardInterrupt:
-                    console.print(Text("^C", style="yellow"))
+                    tio.print("^C", style="yellow")
                     continue
                 if not user_input.strip():
                     break
                 line = user_input.strip()
                 # /resume 待选号模式：纯数字行直接恢复对应会话
                 if commands.maybe_pending(ctx, line):
-                    console.print()
+                    tio.print()
                     continue
                 # 分流：! 直达 → / 命令 → 普通 prompt
                 if commands.dispatch(ctx, line) == "prompt":
+                    inp.set_busy(True)
                     try:
                         one_turn(line)
                     except KeyboardInterrupt:
-                        console.print(Text("(中断本轮)", style="yellow"))
-                        continue
+                        tio.print("(中断本轮)", style="yellow")
+                    except Exception as exc:
+                        # 任何意外都不能炸死交互循环（终端 raw 模式残留 =
+                        # 「戳了错误之后无法运行」）——打印后继续收输入
+                        tio.print(f"⚠ 本轮异常：{exc}", style="bold red")
+                        _log_turn_error(exc)
+                    finally:
+                        inp.set_busy(False)
                 # /loop 消费点：命令处理器置位后，主循环进入自动继续模式
                 if ctx.loop_prompt:
                     pending_prompt = ctx.loop_prompt
                     ctx.loop_prompt = None
                     loop_mode(pending_prompt)
-                console.print()
+                tio.print()
         finally:
             inp.close()
         return 0

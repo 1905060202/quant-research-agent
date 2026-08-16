@@ -65,6 +65,7 @@ class CommandContext:
     plain: bool
     pending: dict = field(default_factory=dict)   # {"resume": [listing rows]}
     loop_prompt: str | None = None   # /loop 待启动的自动继续 prompt（主循环消费）
+    renderer: object | None = None   # TurnRenderer（D011：/fold 折叠管理）
 
 
 class ConsoleHistory:

@@ -14,6 +14,10 @@
 | `qra` 报「找不到 ANTHROPIC_TOKEN」 | ~/.claude/settings.json 无 env.ANTHROPIC_AUTH_TOKEN 或 jq 缺 | `export ANTHROPIC_TOKEN=...` 或用 run_qra.sh 的提取逻辑排查 | 脚本头注释 |
 | hermes 启动告警 state.db WAL-reset / linked SQLite 旧 | 本机 SQLite 3.50.4 有 WAL 损坏 bug，hermes 自动降级 journal_mode=DELETE | 无害告警；按提示 `hermes doctor` / 升级 SQLite 3.51.3+ | hermes 上游 |
 | `qra sync` 报 vendor 目录缺失/无 .git | vendor/ gitignored，新环境没克隆 | 按 `docs/vendor_sync_log.md` 钉针重建（hermes-agent 11c5aae；prime/dsh 见各 VERSION） | D009 |
+| console 输出大量重复、不自动滚动、流式期间打字终端崩 | rich Live 全帧重绘 + 两个不同步 tty 写入者字节插进转义序列中间（CSI 状态机卡死） | D011 追加式渲染（已定型内容只印一次）+ TermIO 单写入者串行化；回合中输入回显静音 | D011 |
+| 终端里无法拖选复制输出、无法滚轮翻页 | 鼠标捕获（`?1000h`）常开吞掉原生选择与滚轮 | 默认关；`/mouse on` 显式开（iTerm2 按住 Option 可临时拖选） | D011 |
+| 输入 /help 回车不执行（只补全不跑） | 旧版斜杠菜单 Enter 只应用草稿不提交 | D011：菜单 Enter=选中即执行；Tab 只补全 | D011 |
+| 回合报错后 console 假死、错误现场拿不到 | 渲染线程无异常兜底 + 终端 raw 模式残留 | 渲染/主循环三层兜底 + `HERMES_HOME/logs/console_errors.log` 落盘（traceback 全文） | D011 |
 
 ## 测试与冒烟框架的坑（都是框架 bug，产品代码一直正确）
 

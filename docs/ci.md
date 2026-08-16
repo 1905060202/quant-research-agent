@@ -5,7 +5,7 @@
 ## 设计原则
 
 1. **零 secret**：CI 不跑真实 API 层（门禁 3/4 层需要 key，本地跑）——CI 只跑
-   离线层 1/2/6。这同时是脱敏红线的一部分：GitHub 仓库里不存在任何凭据。
+   离线层 1/2/7。这同时是脱敏红线的一部分：GitHub 仓库里不存在任何凭据。
 2. **本地与 CI 同款命令**：CI 执行 `scripts/verify_qra.sh --offline` +
    `scripts/scan_credentials.sh` + `scripts/check_docs.py`，本地 push 前跑完全
    一样的命令——不存在「CI 过了本地不知道怎么过」的黑盒。
@@ -50,7 +50,7 @@ bash scripts/scan_credentials.sh
 ## 红灯处理
 
 - **CI 红 = 禁止 push**（push 即发布，见 `docs/development.md` 提交协议）。
-- 层 1/2/6 红：本地跑同层复现（离线层本机与 runner 无环境差异，除了 OS——
+- 层 1/2/7 红：本地跑同层复现（离线层本机与 runner 无环境差异，除了 OS——
   若本地 macOS 绿、CI ubuntu 红，先查路径分隔符/可执行位/CRLF）。
 - 凭据扫描红：按 `docs/development.md`「脱敏红线」处置顺序——先轮换 key
   止血，再处理历史，最后改代码。

@@ -22,7 +22,7 @@
 （缺省 hermes），mode ∈ {full（默认）, apply, report}。prime/dsh 是 essence 源：
 只钉针 + 报告，嫁接面命中 → 人工审 diff 判重移植（D009 §7，`docs/vendor_sync_log.md`）。
 
-## 二、console 命令面（12 个 /命令 + ! 直达）
+## 二、console 命令面（15 个 /命令 + ! 直达）
 
 交互中输入 `/help` 看全表。分类与要点：
 
@@ -40,11 +40,18 @@
 | /status（/st） | 系统 | 会话摘要（id/路由/yolo/时长） |
 | /memory（/mem） | 系统 | $EDITOR 打开记忆文件（编辑前还原 termios） |
 | /loop | 系统 | 自动继续：每轮以 last prompt 重跑（CC 对齐，Ctrl+C 退出） |
+| /fold（/f） | 显示 | 折叠块管理：无参列块表，带序号切换折叠（鼠标点击折叠行等效） |
+| /mouse | 显示 | 鼠标捕获开关：on=点击折叠行展开（原生拖选复制/滚轮失效）；**默认关** |
+| /agents | 显示 | 本进程子代理快照：状态/角色/模型/耗时（delegate_task 类工具） |
 
 **! 直达 shell**：`! git status`——与 terminal 工具同门同黑名单（yolo on 自动放行），
 输出**不进模型上下文**（零 token、零角色污染，vendor 裁决）；120s 超时；交互命令
-（vim 等）另开终端。↑↓ 历史 / Tab 补全（/命令唯一前缀）/ 大块粘贴确认（4096 字节
-且 <200ms 触发）。
+（vim 等）另开终端。
+
+**输入层（D011）**：输入 `/` 即弹候选面板（↑↓ 选择、过滤、Esc 关闭、Tab 补全，
+**Enter=选中即执行**）；←→/Home/End 光标移动、行中插入删除；↑↓ 历史 /
+大块粘贴确认（4096 字节且 <200ms 触发）；回合中打字回显静音、回合结束一次补画
+（流式期间打字不再崩终端）。回合异常落 `HERMES_HOME/logs/console_errors.log`。
 
 ## 三、工具面（模型可见的 6 个工具，toolset="qra"）
 

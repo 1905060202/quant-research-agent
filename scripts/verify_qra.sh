@@ -7,16 +7,18 @@
 #   3. -z 真实 API 工具题 ×2（答案与新浪同源价格动态对照）
 #   4. console 交互 pty 竞态用例 ×2（回合中空行 → 缓冲 → 回合后退出）
 #   5. 命令 pty（全离线）：/help !echo /model /sessions /yolo 逐条断言标记
-#   6. qra_python 持久内核（D007 P2）：py_compile 插件 + 四级验证单测
+#   6. 原始字节 pty（D011）：斜杠菜单/Esc/光标编辑//fold //agents //mouse/
+#      括号粘贴/Ctrl+C 恢复/空行退出（输入层回显协议，只发字节不发提问）
+#   7. qra_python 持久内核（D007 P2）：py_compile 插件 + 四级验证单测
 #      （执行/跨轮变量/dill 恢复/bench 题 + 机理：中断·自愈·LRU·debounce）
 #
 # 用法：scripts/verify_qra.sh          # 全部门禁（含真实 API，约 4-7 分钟）
-#       scripts/verify_qra.sh --offline # 离线层 1/2/6（CI 同款，零凭据零网络）
+#       scripts/verify_qra.sh --offline # 离线层 1/2/7（CI 同款，零凭据零网络）
 # 返回非零 = 门禁失败
 
 set -uo pipefail
 
-# --offline：只跑不依赖凭据与网络的层（1/2/6），与 .github/workflows/ci.yml 同款。
+# --offline：只跑不依赖凭据与网络的层（1/2/7），与 .github/workflows/ci.yml 同款。
 if [[ "${1:-}" == "--offline" ]]; then
     OFFLINE=1
     shift
@@ -31,6 +33,9 @@ echo "== 1/6 py_compile =="
 "$PY" -m py_compile "$ROOT/src/qra/console/commands.py" || FAIL=1
 "$PY" -m py_compile "$ROOT/src/qra/console/handlers.py" || FAIL=1
 "$PY" -m py_compile "$ROOT/src/qra/console/input_layer.py" || FAIL=1
+"$PY" -m py_compile "$ROOT/src/qra/console/renderer.py" || FAIL=1
+"$PY" -m py_compile "$ROOT/src/qra/console/termio.py" || FAIL=1
+"$PY" -m py_compile "$ROOT/src/qra/console/linebuffer.py" || FAIL=1
 "$PY" -m py_compile "$ROOT/src/qra/console/session_state.py" || FAIL=1
 "$PY" -m py_compile "$ROOT/src/qra/console/models_router.py" || FAIL=1
 "$PY" -m py_compile "$ROOT/src/qra/console/approvals.py" || FAIL=1
@@ -96,7 +101,21 @@ else
     echo "  （--offline 跳过：console 启动依赖本地环境）"
 fi
 
-echo "== 6/6 qra_python 持久内核（D007 P2）=="
+echo "== 6/7 原始字节 pty（D011 输入层）=="
+if [ "${OFFLINE:-0}" -ne 1 ]; then
+"$PY" - "$ROOT" <<'PYEOF' || FAIL=1
+import sys
+sys.path.insert(0, sys.argv[1] + "/scripts")
+from _e2e_helpers import run_console_raw
+ok = run_console_raw(sys.argv[1])
+print(f"  原始字节 pty: {'✓' if ok else '✗'}")
+sys.exit(0 if ok else 1)
+PYEOF
+else
+    echo "  （--offline 跳过：console 启动依赖本地环境）"
+fi
+
+echo "== 7/7 qra_python 持久内核（D007 P2）=="
 "$PY" -m py_compile "$ROOT/.hermes/plugins/qra_python/__init__.py" || FAIL=1
 (cd "$ROOT" && "$PY" -m unittest discover -s .hermes/plugins/qra_python/tests 2>&1 | tail -3) || FAIL=1
 

@@ -51,7 +51,7 @@
 
 ```bash
 scripts/verify_qra.sh            # 完整六层（本地日常，需 key）
-scripts/verify_qra.sh --offline  # 离线层 1/2/6（CI 同款，无 key）
+scripts/verify_qra.sh --offline  # 离线层 1/2/7（CI 同款，无 key）
 ```
 
 **层 3/4 的 API 调用计费**（DeepSeek 端点，单次 0.1-0.3 元量级），所以 CI 只跑
@@ -141,7 +141,7 @@ git push origin main
 
 ### CI（GitHub Actions）
 
-`.github/workflows/ci.yml`：push/PR 触发，跑离线层 1/2/6 + 零凭据扫描 +
+`.github/workflows/ci.yml`：push/PR 触发，跑离线层 1/2/7 + 零凭据扫描 +
 文档核对。没有任何 secret、不碰 API。详见 `docs/ci.md`。
 **CD 说明**：本仓库交付物=仓库本身（本地 CLI 工具），无部署目标，push 即发布，
 所以 push 检查单 = 发布检查单。

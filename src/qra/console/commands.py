@@ -65,6 +65,22 @@ def parse_input(text: str):
     return "prompt", text
 
 
+def menu_items(draft: str) -> list[tuple[str, str]]:
+    """斜杠面板候选（D011）：draft 以 / 开头且无空格时，返回匹配的
+    [(规范名, 说明)]。前缀过滤（"" 前缀 = 全部），只列规范名不含别名。"""
+    if not draft.startswith("/") or " " in draft:
+        return []
+    want = draft[1:].lower()
+    out = []
+    for name, d in _COMMANDS.items():
+        if name != d.name:
+            continue
+        if name.startswith(want):
+            out.append((d.name, d.help))
+    out.sort(key=lambda x: x[0])
+    return out
+
+
 def complete(draft: str) -> str | None:
     """Tab 补全：唯一前缀匹配加空格；多个候选给最长公共前缀。
 
@@ -251,6 +267,18 @@ def _register_p0() -> None:
         "loop", "[prompt]", "系统",
         "自动继续：每轮自动以同 prompt 重跑（间隔 60s，Ctrl+C 退出）",
         handlers.cmd_loop, aliases=()))
+    register(CommandDef(
+        "fold", "[序号]", "显示",
+        "折叠块管理：无参列块表，带序号切换折叠（鼠标点击折叠行等效）",
+        handlers.cmd_fold, aliases=("f",)))
+    register(CommandDef(
+        "mouse", "[on|off]", "显示",
+        "鼠标捕获开关：开=点击折叠行展开（原生拖选复制/滚轮失效，iTerm2 按住 Option 可临时拖选）；默认关",
+        handlers.cmd_mouse, aliases=()))
+    register(CommandDef(
+        "agents", "", "显示",
+        "本进程子代理快照：状态/角色/模型/耗时（delegate_task 类工具）",
+        handlers.cmd_agents, aliases=()))
 
 
 _register_p0()

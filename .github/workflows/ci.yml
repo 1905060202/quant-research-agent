@@ -1,10 +1,10 @@
 name: CI
 
-# 零 secret 管道：不注入任何凭据，只跑离线层（verify_qra.sh --offline = 层 1/2/6）
+# 零 secret 管道：不注入任何凭据，只跑离线层（verify_qra.sh --offline = 层 1/2/7）
 # + 零凭据扫描 + 文档核对。设计口径见 docs/ci.md（本地与 CI 同款命令）。
 #
 # 触发：push 到 main / PR / 手动（Actions 页 Run workflow）。
-# 注：本地完整门禁含真实 API 层 3/4/5，CI 跑不了（零凭据原则），
+# 注：本地完整门禁含真实 API 层 3/4/5/6，CI 跑不了（零凭据原则），
 #     所以完整门禁永远在本地跑完再 push——见 docs/development.md 推送前检查单。
 
 on:

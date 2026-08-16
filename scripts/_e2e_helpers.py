@@ -220,3 +220,82 @@ def run_console_cmd(root: str, cases: list) -> bool:
 if __name__ == "__main__":
     print("helper 模块，由 verify_qra.sh 调用")
     sys.exit(1)
+
+
+def run_console_raw(root: str) -> bool:
+    """D011 原始字节 pty（全离线）：斜杠菜单弹出/Esc 关闭/←→ 光标编辑/
+    /fold /agents /mouse /括号粘贴/Ctrl+C 恢复，最后空行退出 rc=0。
+
+    只发字节不发模型提问：断言输入层与命令面的回显协议。
+    """
+    pid, fd = pty.fork()
+    if pid == 0:
+        os.execv(f"{root}/bin/qra", ["bin/qra", "console"])
+
+    out = b""
+
+    def drain(timeout: float) -> None:
+        nonlocal out
+        end = time.time() + timeout
+        while time.time() < end:
+            rlist, _, _ = select.select([fd], [], [], 1.0)
+            if rlist:
+                try:
+                    out += os.read(fd, 65536)
+                except OSError:
+                    return
+
+    def send_and_wait(data: bytes, marker: str, timeout: float = 12.0) -> bool:
+        os.write(fd, data)
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            drain(1)
+            if marker in _strip_ansi(out):
+                return True
+        print(f"  ✗ 字节序列 {data[:24]!r} 未出现标记 {marker!r}")
+        return False
+
+    drain(60)  # agent 构造（MCP 发现等）
+    ok = True
+    ok &= send_and_wait(b"/", "显示全部命令")        # 斜杠菜单弹出
+    # Esc 关菜单草稿残留 "/"，先退格清掉再输入，否则会拼成 //x
+    ok &= send_and_wait(b"\x1b\x7fx", "❯ x")         # Esc 关菜单 + 清残留 + 普通键回显
+    ok &= send_and_wait(b"\x7f", "❯ ")               # 退格清掉 x
+    ok &= send_and_wait(b"abc", "abc")               # 行编辑回显
+    os.write(fd, b"\x1b[D\x1b[C\x7f\x7f\x7f\x7f")    # ←→ 光标移动 + 清草稿（不提交）
+    drain(2)
+    # 以下命令若被误当 prompt 提交会触发真实 API 回合，busy 中排队空行=回合后退出
+    # （本用例断言离线命令面，不触碰模型）。菜单 Enter=执行（D011），单回车即跑。
+    ok &= send_and_wait(b"/fold\n", "没有可折叠的块")   # 菜单选中即执行
+    ok &= send_and_wait(b"/agents\n", "尚无子代理记录")
+    ok &= send_and_wait(b"/mouse\n", "鼠标捕获：关（默认）")
+    ok &= send_and_wait(b"\x1b[200~hello\x1b[201~", "hello")  # 括号粘贴一次重绘
+    n_hello = _strip_ansi(out).count("hello")
+    if n_hello > 2:
+        print(f"  ✗ 括号粘贴回显 {n_hello} 次（应 ≤2）")
+        ok = False
+    os.write(fd, b"\x7f" * 5)                        # 清草稿
+    drain(2)
+    ok &= send_and_wait(b"\x03", "^C")               # Ctrl+C 恢复（不退出）
+    os.write(fd, b"\n")                              # 空行退出
+    deadline = time.time() + 120
+    rc = None
+    while time.time() < deadline:
+        try:
+            wpid, status = os.waitpid(pid, os.WNOHANG)
+            if wpid != 0:
+                rc = os.waitstatus_to_exitcode(status)
+                break
+        except ChildProcessError:
+            rc = -99
+            break
+        drain(1)
+    if rc is None:
+        os.kill(pid, 9)
+        print("  ✗ 原始字节 pty 挂死（120s 未退出）")
+        return False
+    if rc != 0:
+        plain = _strip_ansi(out)
+        print(f"  ✗ 原始字节 pty rc={rc} 输出尾部：{plain[-500:]}")
+        ok = False
+    return ok
