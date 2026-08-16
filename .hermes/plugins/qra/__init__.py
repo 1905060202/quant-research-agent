@@ -119,13 +119,23 @@ _TOOLS = [
 
 
 def register(ctx) -> None:
-    """插件入口：被 PluginManager 在 plugins.enabled 命中时调用一次。"""
+    """插件入口：被 PluginManager 在 plugins.enabled 命中时调用一次。
+
+    vendor 约定（对照 bundled spotify / execute_code）：schema 必须是完整
+    function 信封 {name, description, parameters}——registry.get_definitions
+    原样合并进工具面。裸 JSON schema（type/properties/required 顶层）会导致
+    deferred 面（tool_search/tool_describe 桥）拿不到描述与参数，模型只见
+    裸名字（2026-08-17 自诊断修复 A：空描述断层根因）。
+    """
     for name, toolset, schema, handler, emoji, description in _TOOLS:
         ctx.register_tool(
             name=name,
             toolset=toolset,
-            schema=schema,
+            schema={
+                "name": name,
+                "description": description,
+                "parameters": schema,
+            },
             handler=handler,
-            description=description,
             emoji=emoji,
         )

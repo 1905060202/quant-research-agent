@@ -24,6 +24,7 @@ data/
 .hermes/hooks/
 .hermes/skills/*
 !.hermes/skills/qra_daily/
+!.hermes/skills/qra/
 .hermes/audio_cache/
 .hermes/image_cache/
 .hermes/pairing/

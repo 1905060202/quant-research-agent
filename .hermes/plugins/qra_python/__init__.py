@@ -60,7 +60,19 @@ MAX_OUTPUT_CHARS = int(os.environ.get("QRA_PY_MAXOUT", "4000") or 4000)
 MAX_CODE_CHARS = int(os.environ.get("QRA_PY_MAXCODE", "16000") or 16000)
 SNAPSHOT_DEBOUNCE_S = float(os.environ.get("QRA_PY_DEBOUNCE", "15") or 15)
 SNAPSHOT_MIN_INTERVAL_S = float(os.environ.get("QRA_PY_MIN_INTERVAL", "30") or 30)
-IDLE_SHUTDOWN_S = float(os.environ.get("QRA_PY_IDLE", "1800") or 1800)
+def _idle_cfg() -> tuple[float, bool]:
+    """QRA_PY_IDLE 解析：空=默认 1800s；≤0=永不关停。
+
+    0 是「永不停」哨兵，不是「立刻停」——旧实现 float("0")=0.0 让
+    ``now - last_exec >= 0`` 恒真，内核第一个 debounce tick（默认 5s）
+    就被杀。返回 (秒数, 是否启用空闲关停)。
+    """
+    raw = os.environ.get("QRA_PY_IDLE", "") or "1800"
+    secs = float(raw)
+    return secs, secs > 0
+
+
+IDLE_SHUTDOWN_S, IDLE_ENABLED = _idle_cfg()
 DEBOUNCE_TICK_S = float(os.environ.get("QRA_PY_TICK", "5") or 5)
 MAX_LIVE_KERNELS = int(os.environ.get("QRA_PY_MAXLIVE", "2") or 2)
 MAX_SNAPSHOT_BYTES = int(os.environ.get("QRA_PY_MAXSNAP", str(256 << 20)) or 256 << 20)
@@ -442,7 +454,7 @@ def _debounce_loop() -> None:
                         _snapshot(e)
                         e.dirty = False
                         e.last_snapshot = time.monotonic()
-                    if now - e.last_exec >= IDLE_SHUTDOWN_S:
+                    if IDLE_ENABLED and now - e.last_exec >= IDLE_SHUTDOWN_S:
                         if e.dirty:
                             _snapshot(e)
                         _shutdown(e)
@@ -1298,8 +1310,16 @@ def register(ctx) -> None:
         ctx.register_tool(
             name=name,
             toolset=toolset,
-            schema=schema,
+            # vendor 约定：schema 是完整 function 信封（{name, description,
+            # parameters}），registry.get_definitions 原样合并。裸 JSON
+            # schema 会让 deferred 面（tool_search/tool_describe 桥）返回
+            # 空描述+空 schema——模型只见裸名字，永远不主动调用
+            # （2026-08-17 自诊断修复 A：空描述断层根因）。
+            schema={
+                "name": name,
+                "description": description,
+                "parameters": schema,
+            },
             handler=handler,
-            description=description,
             emoji=emoji,
         )

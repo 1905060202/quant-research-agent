@@ -19,6 +19,7 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
 Q = None  # setUpModule 里填充（env 必须先于 import）
 
@@ -311,6 +312,40 @@ class TestMechanisms(KernelTestCase):
         self.assertTrue(r["ok"], r)
         self.assertEqual(r["result"], "'沉睡中'")
         self.assertTrue(r.get("restored_from_snapshot"), r)
+
+    def test_idle_env_parsing(self):
+        """QRA_PY_IDLE 解析：空=默认 1800；0/负数=永不关停（旧 bug：0→立刻停）。"""
+        with mock.patch.dict(os.environ, {"QRA_PY_IDLE": ""}):
+            secs, enabled = Q._idle_cfg()
+            self.assertEqual(secs, 1800.0)
+            self.assertTrue(enabled)
+        with mock.patch.dict(os.environ, {"QRA_PY_IDLE": "0"}):
+            secs, enabled = Q._idle_cfg()
+            self.assertEqual(secs, 0.0)
+            self.assertFalse(enabled)
+        with mock.patch.dict(os.environ, {"QRA_PY_IDLE": "-1"}):
+            _, enabled = Q._idle_cfg()
+            self.assertFalse(enabled)
+        with mock.patch.dict(os.environ, {"QRA_PY_IDLE": "300"}):
+            secs, enabled = Q._idle_cfg()
+            self.assertEqual(secs, 300.0)
+            self.assertTrue(enabled)
+
+    def test_idle_disabled_kernel_survives(self):
+        """禁用空闲关停（QRA_PY_IDLE≤0 的模块态）：内核越过旧 bug 的
+        首 tick 即杀窗口仍存活，状态可继续复用。"""
+        sid = "m_noidle"
+        Q.IDLE_ENABLED = False
+        try:
+            e = Q._ensure_kernel(sid)
+            Q._execute_with_retry(e, "no_idle = '长寿'")
+            time.sleep(1.5)   # 5 个 tick（0.3s）；旧实现 0 哨兵在此早已被杀
+            self.assertTrue(Q._kernel_alive(e), "禁用空闲关停后内核应存活")
+            r = _call(sid, "no_idle")
+            self.assertTrue(r["ok"], r)
+            self.assertEqual(r["result"], "'长寿'")
+        finally:
+            Q.IDLE_ENABLED = True
 
     def test_handler_validation(self):
         self.assertIn("缺少 code", Q.qra_python({}, session_id="v"))

@@ -345,12 +345,21 @@ def register(ctx) -> None:
     ctx.register_tool(
         name="qra_verify",
         toolset="qra",
-        schema=QRA_VERIFY_SCHEMA,
+        # vendor 约定：schema 是完整 function 信封（{name, description,
+        # parameters}）——裸 JSON schema 会让 deferred 面
+        # （tool_search/tool_describe 桥）返回空描述+空 schema
+        # （2026-08-17 自诊断修复 A）。
+        schema={
+            "name": "qra_verify",
+            "description": (
+                "验证闭环：把关键声称登记进账本并跑确定性检查"
+                "（行情合理性/文件存在/内容命中/数值区间）。"
+                "声称不过会被回合末守卫拦下要求修复、撤回或诚实标注。"
+                "相对路径以 hermes 进程 cwd（项目根）为基准。"
+            ),
+            "parameters": QRA_VERIFY_SCHEMA,
+        },
         handler=qra_verify,
-        description=("验证闭环：把关键声称登记进账本并跑确定性检查"
-                     "（行情合理性/文件存在/内容命中/数值区间）。"
-                     "声称不过会被回合末守卫拦下要求修复、撤回或诚实标注。"
-                     "相对路径以 hermes 进程 cwd（项目根）为基准。"),
         emoji="✅",
     )
     ctx.register_hook("pre_verify", _pre_verify)

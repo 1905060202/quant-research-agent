@@ -2,7 +2,8 @@
 
 **量化研究智能体**：hermes-agent 骨架 + QRA 嫁接层的融合架构——把「行情数据 →
 信号 → 方法论文档 → 日报 + 验证卡」做成一条可评测、可复算的自动流水线，
-并带一个与 Claude Code 对齐的交互终端（CoT 全展示 + /命令体系 + 持久 Python 内核）。
+并带一个与 Claude Code 对齐的交互终端（CoT 全展示 + /命令体系 + 持久 Python 内核——
+凡是「算」的走内核，路由铁律见 AGENTS.md）。
 
 [![CI](https://github.com/1905060202/quant-research-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/1905060202/quant-research-agent/actions/workflows/ci.yml)
 
@@ -11,8 +12,8 @@
 | 层 | 实现 | 说明 |
 |---|---|---|
 | 终端 | `qra` 入口 + `src/qra/console/` | prime 式 CoT 全展示（无框流式+追加式渲染不重复）；15 个 /命令（resume/clear/export/model/yolo/loop/fold/mouse/agents…，输入 / 即弹菜单，Enter 即执行）；! 直达 shell；←→ 光标编辑/↑↓历史/Tab 补全/大粘贴确认；deepseek↔opus 双路由 |
-| 工具 | `.hermes/plugins/qra/` | qra_quote 新浪实时行情 / qra_signal 猎豹信号摘要（诚实标注数据新鲜度）/ qra_kb_fts 方法论 FTS 检索 / qra_sync 上游同步 |
-| 内核 | `.hermes/plugins/qra_python/` | 会话级 Jupyter 持久内核：变量跨调用存活、dill 快照跨重启复活、死内核自愈；预装 qra_runtime（prime 完全体）——`qra.run` 递归子代理、harness 文件店、agent_message |
+| 工具 | `.hermes/plugins/qra/` | qra_quote 新浪实时行情 / qra_signal 猎豹信号摘要（诚实标注数据新鲜度）/ qra_kb_fts 方法论 FTS 检索 / qra_sync 上游同步；全工具 schema 信封化——deferred 面 tool_describe 描述可信（回归锁 `src/qra/tests/test_plugin_envelope.py`） |
+| 内核 | `.hermes/plugins/qra_python/` | D007 指令③「全生命周期计算底座」：会话级 Jupyter 持久内核，变量跨调用存活、dill 快照跨重启复活、死内核自愈；凡是「算」的走内核（AGENTS.md/SOUL.md/skill 三层注入，禁止退回 execute_code 一次性脚本）；生命周期可调——QRA_PY_IDLE≤0=永不关停、QRA_PY_MAXLIVE=2 LRU 池；预装 qra_runtime（prime 完全体）——`qra.run` 递归子代理、harness 文件店、agent_message |
 | 记忆 | `.hermes/plugins/qra_memory/` | Mem0 式 ADD 协议：三重去重（会话/精确/近似≥0.85）+ 价格锚放宽 + 叙事链；显式检索回忆 |
 | 验证 | `.hermes/plugins/qra_verify/` | claims 账本 + 4 类确定性检查器（行情/文件/内容/区间）+ 回合末守卫强制续跑 |
 | 评审 | `.hermes/plugins/qra_refine/` | prime 准入门三段流水线移植（官方 background_review 钩，fail-loud 启动自检），拒绝→零写入 |
