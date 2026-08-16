@@ -155,6 +155,68 @@ def run_interactive(root: str, tag: str) -> bool:
     return ok
 
 
+def run_console_cmd(root: str, cases: list) -> bool:
+    """命令 pty：单进程依次发命令，逐条断言标记，空行退出 rc=0。
+
+    cases = [(命令行, 标记)]；标记为 str 或 tuple（任一命中即过）。
+    全离线：不发模型提问，只验证 /命令与 ! 直达的交互面。
+    """
+    pid, fd = pty.fork()
+    if pid == 0:
+        os.execv(f"{root}/bin/qra", ["bin/qra", "console"])
+
+    out = b""
+
+    def drain(timeout: float) -> None:
+        nonlocal out
+        end = time.time() + timeout
+        while time.time() < end:
+            rlist, _, _ = select.select([fd], [], [], 1.0)
+            if rlist:
+                try:
+                    out += os.read(fd, 65536)
+                except OSError:
+                    return
+
+    drain(60)  # agent 构造（MCP 发现等）
+    ok = True
+    for cmd, marker in cases:
+        os.write(fd, (cmd + "\n").encode())
+        markers = marker if isinstance(marker, tuple) else (marker,)
+        seen = False
+        for _ in range(12):
+            drain(5)
+            plain = _strip_ansi(out)
+            if any(m in plain for m in markers):
+                seen = True
+                break
+        if not seen:
+            print(f"  ✗ 命令 [{cmd}] 未出现标记 {markers}")
+            ok = False
+    os.write(fd, b"\n")  # 空行退出
+    deadline = time.time() + 120
+    rc = None
+    while time.time() < deadline:
+        try:
+            wpid, status = os.waitpid(pid, os.WNOHANG)
+            if wpid != 0:
+                rc = os.waitstatus_to_exitcode(status)
+                break
+        except ChildProcessError:
+            rc = -99
+            break
+        drain(1)
+    if rc is None:
+        os.kill(pid, 9)
+        print("  ✗ 命令 pty 挂死（120s 未退出）")
+        return False
+    if rc != 0:
+        plain = _strip_ansi(out)
+        print(f"  ✗ 命令 pty rc={rc} 输出尾部：{plain[-500:]}")
+        ok = False
+    return ok
+
+
 if __name__ == "__main__":
     print("helper 模块，由 verify_qra.sh 调用")
     sys.exit(1)

@@ -17,3 +17,17 @@ plugins:
 # 内置 MEMORY.md 仍可用作会话草稿；qra_memory 是持久层
 memory:
   provider: qra_memory
+
+# 审批：/yolo off 时 agent 工具线程无审批回调（TLS 只认主线程），
+# fail-closed 自动拒绝 + 60s 超时兜底，防挂死
+approvals:
+  timeout: 60
+
+# 上下文覆盖：/model opus 时 get_model_context_length("opus") 走 models.dev
+# 网络探测实测 27.8s（代理不可达时挂死切换），此显式覆盖走官方 step 0b
+# 短路（config-read only，永不阻塞网络）。1000000 与 models.dev 对
+# claude-opus-5 的 catalog 值一致。
+model_overrides:
+  anthropic:
+    opus:
+      context_window: 1000000

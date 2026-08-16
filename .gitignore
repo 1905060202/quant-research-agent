@@ -12,6 +12,8 @@ __pycache__/
 data/
 
 # HERMES_HOME 运行时状态（只跟踪 .hermes/config.yaml 与 .hermes/plugins/ 定制层源码）
+.hermes/console_history.jsonl
+.hermes/exports/
 .hermes/sessions/
 .hermes/logs/
 .hermes/state.db

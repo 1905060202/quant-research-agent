@@ -50,3 +50,12 @@
 - **门禁**: 四层全绿 ✓。
 - **回滚点**: `cd vendor/hermes-agent && git checkout cc1c125 && echo cc1c125 > VERSION`
 - **备注**: 验证中上游连续推进，两次入口各完成一次真实同步——命令与工具都被真实上游验证过，不是纸面测试。
+
+---
+
+## #5 · 2026-08-16 · 嫁接面扩充（console P0 命令面，无 pin 变更）
+
+- **范围**: 无上游同步。QRA 侧 console 功能对齐（/命令 + ! 直达 + resume/clear/compact + 双路由 + 输入历史），新增依赖 hermes 内部模块 12 项，GRAFT_PATHS 21 → 33。
+- **新增嫁接**: hermes_cli/bang_shell.py、hermes_cli/session_listing.py、hermes_cli/cli_commands_mixin.py（/resume 序列母本）、tools/terminal_tool.py、tools/todo_tool.py、tools/memory_tool.py、agent/agent_runtime_helpers.py、agent/conversation_compression.py、agent/memory_manager.py、agent/model_metadata.py、gateway/session_context.py（补登欠账，main.py 早已 import）、hermes_constants.py。
+- **门禁**: 五层全绿 ✓（py_compile / 单测 61 / -z 真实 API ×2 / 交互 pty 竞态 ×2 / 命令 pty ×5，GATE_RC=0）+ 全链路冒烟连续两遍全绿（scripts/_smoke_console.py：命令面 → 真实提问 → /clear → /sessions → /resume 链 → 双路由往返 → 大块粘贴确认 → state.db/导出抽查）。冒烟期间抓出并修复 3 个测试框架自身 bug：pty 双向互锁（常驻 drainer）、marker 撞车（"最近会话" 在 /help 里也有→改 ┃  # 计数等待）、check_db 表选择无序（session_model_usage 误当 sessions）。
+- **备注**: 所有命令处理器的 vendor 序列照抄官方实现并注释了 文件:行号 依据（cli_commands_mixin.py:1010-1143 等），上游改动这些文件会被嫁接面核对拦住人工复核。

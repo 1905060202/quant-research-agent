@@ -49,7 +49,19 @@ GRAFT_PATHS = [
     "hermes_cli/main.py",              # -z 启动守卫等 CLI 路径
     "cli.py",                          # CLI 入口（run_qra.sh 走这里）
     "hermes_cli/auth.py",
-    "tools/approval.py",               # 审批面板（交互模式工具确认）
+    "hermes_cli/bang_shell.py",        # qra_console: ! 直达（is/parse/check/run）
+    "hermes_cli/session_listing.py",   # qra_console: /resume /sessions 列表
+    "hermes_cli/cli_commands_mixin.py",  # qra_console: /resume 官方序列母本
+    "tools/approval.py",               # 审批面板 + session 级 yolo 开关
+    "tools/terminal_tool.py",          # qra_console: set_approval_callback / guards
+    "tools/todo_tool.py",              # qra_console: /resume 重建 TodoStore
+    "tools/memory_tool.py",            # qra_console: get_memory_dir（/memory /export）
+    "agent/agent_runtime_helpers.py",  # qra_console: switch_model 快照回滚
+    "agent/conversation_compression.py",  # qra_console: /compact 序列
+    "agent/memory_manager.py",         # qra_console: on_session_switch
+    "agent/model_metadata.py",         # qra_console: estimate_request_tokens_rough
+    "gateway/session_context.py",      # qra_console: set_current_session_id（补登）
+    "hermes_constants.py",             # qra_console: 会话源/环境常量
     "agent/background_review.py",      # qra_refine: _XX_REVIEW_PROMPT 常量
     "agent/plugin_llm.py",             # qra_* 插件注册面
     "agent/plugin_stream_hooks.py",

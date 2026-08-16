@@ -1,16 +1,23 @@
-"""QRA Console — prime 式 CoT 全展示终端（ADR D007 · Phase 1）。
+"""QRA Console — prime 式 CoT 全展示终端（ADR D007 · Phase 1 + P0 命令面）。
 
 机理（见 docs/机理研究_prime与CC逆向_2026-08-14.md）：
   - CoT 是消息的一等 content block：默认全展开逐 token 流式渲染，Ctrl+T 折叠，
     折叠态显示 recap（推理中最后一个 **加粗标题**）——prime 原版算法
   - 工具调用/结果实时块（args 摘要 + 结果预览 + 时长）
   - footer 显示成本（反 prime 品牌选择：量化场景成本要可见）
-  - 多轮交互：同一 AIAgent 实例 + conversation_history 续聊
+  - 多轮交互：同一 AIAgent 实例 + SessionState.history 续聊
+
+P0 命令面（CC/prime/hermes 原生功能对齐，2026-08-16）：
+  - / 命令：help/resume/sessions/clear/compact/export/model/yolo/usage/status/memory
+  - ! 直达 shell（vendor bang_shell：同 terminal 工具同门审批，输出不进上下文）
+  - ↑↓ 历史 / Tab 补全 / 大块粘贴确认 / 双路由切换（deepseek ↔ opus@8789）
 
 架构（零 vendor 改动）：
   导入 run_agent.AIAgent（hermes 根模块公开类，oneshot/tui_gateway 同款先例），
   注入 reasoning_callback / stream_delta_callback / 工具回调，显示层 100% 接管。
   核心循环、provider、持久化全部复用 vendor。
+  InputLayer 迁至 qra.console.input_layer（本模块 re-export 保测试门禁路径），
+  命令注册/分发在 qra.console.commands，处理器在 qra.console.handlers。
 
 回调线程 → 事件队列 → 渲染线程（每次 drain 后一帧 reconcile，prime pi-tui 同款思路）。
 """
@@ -18,18 +25,13 @@
 from __future__ import annotations
 
 import argparse
-import codecs
 import json
 import logging
 import os
 import queue
-import select
-import signal
 import sys
-import termios
 import threading
 import time
-import unicodedata
 
 from rich import box
 from rich.console import Console, Group
@@ -38,9 +40,18 @@ from rich.markdown import Markdown
 from rich.panel import Panel
 from rich.text import Text
 
-# DeepSeek 公开价（USD / 1M tokens），¥ 按 7.2 折算
-_PRICE_USD = {"input": 0.27, "output": 1.10, "cache_read": 0.027}
-_USD_CNY = 7.2
+# 入口自举：脚本入口是 `python -m src.qra.console.main`（包根在 CWD），
+# qra.* 顶层导入需要 src/ 在 sys.path 上。vendor 顶层模块靠 editable 安装
+# 解析不受影响；qra 自身没有安装面，此处与 test_inputlayer.py 同约定自补。
+# 以 qra.console.main 形式导入时该路径已在 sys.path，guard 是 no-op。
+_src_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+if _src_root not in sys.path:
+    sys.path.insert(0, _src_root)
+
+# InputLayer/_char_width 从 input_layer.py 迁出后 re-export：
+# test_inputlayer.py 依赖 qra.console.main 此路径（门禁兼容，不破不改）
+from qra.console.input_layer import InputLayer, _char_width, detect_paste  # noqa: F401
+from qra.console.session_state import PRICE_USD, USD_CNY
 
 # 工具结果预览上限（字符），超出截断并注明
 _RESULT_PREVIEW_MAX = 3000
@@ -171,12 +182,12 @@ def _render_usage(usage: dict, model: str) -> Text:
     out = usage.get("output_tokens") or 0
     cache = usage.get("cache_read_tokens") or 0
     api = usage.get("api_calls") or 0
-    usd = (inp * _PRICE_USD["input"] + out * _PRICE_USD["output"]
-           + cache * _PRICE_USD["cache_read"]) / 1e6
+    usd = (inp * PRICE_USD["input"] + out * PRICE_USD["output"]
+           + cache * PRICE_USD["cache_read"]) / 1e6
     t = Text("▸ ", style="bold")
     t.append(f"{model}", style="bold cyan")
     t.append(f" · in {inp:,} / out {out:,} / cache读 {cache:,} · {api} 次调用", style="dim")
-    t.append(f" · ≈¥{usd * _USD_CNY:.3f}", style="green")
+    t.append(f" · ≈¥{usd * USD_CNY:.3f}", style="green")
     return t
 
 
@@ -279,151 +290,6 @@ def _result_looks_ok(result: str) -> bool:
     return True
 
 
-# ---------------------------------------------------------------- 输入层（会话级）
-# prime 机理落地：单一持久读线程 + 自有行编辑，不依赖 input()/readline。
-# 此前"每回合起停 key thread"的架构有交还竞态——key thread 读走字节后主循环
-# 已越过缓冲检查，input() 永远等不到（pty 实证挂死）。会话级输入层没有
-# raw/cooked 转换窗口：回合中敲入直接进行缓冲，回合后主循环从队列取行。
-
-def _char_width(c: str) -> int:
-    """终端显示列宽（CJK 全角占 2 列），退格回显用。"""
-    return 2 if unicodedata.east_asian_width(c) in ("W", "F") else 1
-
-
-class InputLayer:
-    """交互会话持有一个实例：cbreak-noecho + 读线程 + 行队列。
-
-    行为：
-    - Ctrl+T 折叠/展开思考（写 TurnState.dirty 触发渲染重画）
-    - Ctrl+C 还原 SIGINT（cbreak 下 ISIG 已关）；Ctrl+Z → SIGTSTP
-    - 回车提交整行进队列；退格删一个字符（按显示列宽回显）；^D 空行 = EOF
-    - 回显直达 /dev/tty——回合中 stdout 被重定向进 StringIO，绕开它才可见
-    """
-
-    EOF = object()
-
-    def __init__(self, state: TurnState) -> None:
-        self._q: "queue.Queue" = queue.Queue()
-        self._state = state
-        self._fd = sys.stdin.fileno()
-        self._tty_out = None
-        try:
-            self._tty_out = os.open("/dev/tty", os.O_WRONLY)
-        except OSError:
-            self._tty_out = None
-        self._stop = threading.Event()
-        self._thread = threading.Thread(
-            target=self._run, daemon=True, name="qra-console-input")
-        # 行编辑状态：raw 字节（提交用）+ 字符列表（退格按字符删）
-        self._raw = bytearray()
-        self._chars: list[tuple[str, int]] = []   # (字符, 字节数)
-        self._dec = codecs.getincrementaldecoder("utf-8")(errors="replace")
-
-    def start(self) -> None:
-        self._thread.start()
-
-    def pop(self) -> str:
-        item = self._q.get()
-        if item is self.EOF:
-            raise EOFError
-        return item
-
-    def draft(self) -> str:
-        return "".join(c for c, _ in self._chars)
-
-    def redraw(self) -> None:
-        """回合结束后把已有草稿补回显到新提示符后（清理回合中乱插的回显）。"""
-        if self._chars:
-            self._echo(self.draft().encode("utf-8", "replace"))
-
-    def close(self) -> None:
-        self._stop.set()
-        self._thread.join(timeout=1)
-
-    # ------------------------------------------------------------ 内部
-
-    def _echo(self, data: bytes) -> None:
-        if self._tty_out is not None:
-            try:
-                os.write(self._tty_out, data)
-            except OSError:
-                pass
-
-    def _submit(self) -> None:
-        self._echo(b"\r\n")
-        self._q.put(self._raw.decode("utf-8", "replace"))
-        self._raw.clear()
-        self._chars.clear()
-
-    def _push_char(self, ch: str) -> None:
-        n = len(ch.encode("utf-8"))
-        self._chars.append((ch, n))
-        self._raw.extend(ch.encode("utf-8"))
-
-    def _backspace(self) -> None:
-        if not self._chars:
-            return
-        ch, n = self._chars.pop()
-        w = _char_width(ch)
-        self._echo(b"\b" * w + b" " * w + b"\b" * w)
-        del self._raw[-n:]
-
-    def _run(self) -> None:
-        # cbreak-noecho：只清 lflag 的 ICANON/ECHO/ISIG/IEXTEN，
-        # 保留 OPOST（输出 \n→\r\n 转译照旧）与 iflag 其余位。
-        # stdin 非 tty（单测/降级）时跳过 termios，裸 select+read 照常工作。
-        try:
-            old = termios.tcgetattr(self._fd)
-        except termios.error:
-            old = None
-        if old is not None:
-            tio = old
-            tio[3] &= ~(termios.ICANON | termios.ECHO | termios.ISIG | termios.IEXTEN)
-            tio[6][termios.VMIN] = 0
-            tio[6][termios.VTIME] = 0
-            termios.tcsetattr(self._fd, termios.TCSADRAIN, tio)
-        try:
-            while not self._stop.is_set():
-                ready, _, _ = select.select([sys.stdin], [], [], 0.2)
-                if not ready:
-                    continue
-                try:
-                    chunk = os.read(self._fd, 64)
-                except OSError:
-                    continue
-                if not chunk:  # EOF
-                    self._q.put(self.EOF)
-                    break
-                for b in chunk:
-                    if self._handle(bytes([b])):
-                        return  # EOF 路径：直接收线程（finally 还原 termios）
-        finally:
-            if old is not None:
-                termios.tcsetattr(self._fd, termios.TCSADRAIN, old)
-
-    def _handle(self, b: bytes) -> bool:
-        """处理单字节；返回 True 表示终止线程（EOF 路径）。"""
-        if b == b"\x14":  # Ctrl+T 折叠
-            self._state.show_thinking = not self._state.show_thinking
-            self._state.dirty = True
-        elif b == b"\x03":  # Ctrl+C → SIGINT（ISIG 已关，手动还原）
-            os.kill(os.getpid(), signal.SIGINT)
-        elif b == b"\x1a":  # Ctrl+Z → SIGTSTP
-            os.kill(os.getpid(), signal.SIGTSTP)
-        elif b in (b"\r", b"\n"):
-            self._submit()
-        elif b in (b"\x7f", b"\x08"):  # 退格
-            self._backspace()
-        elif b == b"\x04" and not self._chars:  # ^D 空行 = EOF
-            self._q.put(self.EOF)
-            return True
-        elif b >= b" " or b == b"\t":  # 可见字符（含 Tab）
-            for ch in self._dec.decode(b):
-                self._push_char(ch)
-                self._echo(ch.encode("utf-8"))
-        return False
-
-
 # ---------------------------------------------------------------- 渲染循环
 
 def _render_loop(events: "queue.Queue", state: TurnState, live: Live,
@@ -519,10 +385,14 @@ def _resolve_model_provider(args) -> tuple[str, str | None]:
 
 
 def build_agent(args):
-    """构造 AIAgent（照抄 oneshot 最小参数集 + 自有显示回调）。零 vendor 改动。"""
-    # 控制台单线程驻留：审批自动放行（QRA 工具为只读/验证类，风险低）。
-    # 见 oneshot 同款注释。
-    os.environ["HERMES_YOLO_MODE"] = "1"
+    """构造 AIAgent（照抄 oneshot 最小参数集 + 自有显示回调）。零 vendor 改动。
+
+    返回 5 元组 (agent, session_db, events, state, sess)。
+    YOLO 不走 HERMES_YOLO_MODE env：approval.py import 时冻结为
+    _YOLO_MODE_FROZEN（运行期设置无效）——改用 session 级开关
+    enable_session_yolo，/yolo 可切、行持久化、resume 可恢复（默认开）。
+    """
+    os.environ["HERMES_INTERACTIVE"] = "1"   # 终端交互标志（sudo 提示等路径）
     os.environ["HERMES_ACCEPT_HOOKS"] = "1"
     from gateway.session_context import declare_stateless_channel
 
@@ -581,7 +451,29 @@ def build_agent(args):
     )
     # oneshot 同款保险：不让 agent 自己的输出污染终端
     agent.suppress_status_output = True
-    return agent, session_db, events, state
+
+    # ---- QRA console 会话装配（P0 命令面）----
+    from qra.console import approvals, models_router
+    from qra.console.session_state import SessionState, new_session_id
+    from tools.approval import enable_session_yolo
+
+    models_router.capture_primary(agent)
+    sid = agent.session_id or new_session_id()
+    approvals.sync_session_key(sid)
+    # 默认开（用户拍板）；_ensure_db_session 惰性建行时把活动 yolo 写进
+    # 创建行 model_config，--resume 可恢复
+    enable_session_yolo(sid or "default")
+    sess = SessionState(
+        session_id=sid,
+        model=agent.model or "",
+        provider=getattr(agent, "provider", None) or None,
+        base_url=getattr(agent, "base_url", "") or "",
+        api_mode=getattr(agent, "api_mode", "") or "",
+        route_name=models_router.infer_route_name(
+            getattr(agent, "base_url", "") or ""),
+        yolo=True,
+    )
+    return agent, session_db, events, state, sess
 
 
 def cleanup(agent, session_db) -> None:
@@ -681,8 +573,9 @@ def run_turn(agent, session_db, events, state, prompt: str,
 def parse_args(argv=None) -> argparse.Namespace:
     p = argparse.ArgumentParser(
         prog="qra console",
-        description="QRA 控制台：prime 式 CoT 全展示（D007 Phase 1）",
-        epilog="交互中 Ctrl+T 折叠/展开思考；空输入或 Ctrl+D 退出。"
+        description="QRA 控制台：prime 式 CoT 全展示（D007 Phase 1 + P0 命令面）",
+        epilog="交互中 /help 看全部命令（/resume /model /yolo /export …）、"
+               " ! 直达 shell、↑↓ 历史、Ctrl+T 折叠思考；空输入或 Ctrl+D 退出。"
                " 输出被管道时自动降级为 plain（只打最终答复）。")
     p.add_argument("-z", "--prompt", help="单发提问（省略则进入多轮交互）")
     p.add_argument("--model", help="模型覆盖（默认 deepseek-v4-pro）")
@@ -703,20 +596,25 @@ def main(argv=None) -> int:
 
     agent = session_db = None
     try:
-        agent, session_db, events, state = build_agent(args)
-        conversation_history: list = []
+        agent, session_db, events, state, sess = build_agent(args)
 
         def one_turn(prompt: str) -> dict:
-            nonlocal conversation_history
+            # 自动标题（每会话只试一次；set_auto_title_if_empty 幂等兜底）
+            if not sess.title_done and sess.session_id:
+                sess.mark_title_set()
+                try:
+                    session_db.set_auto_title_if_empty(sess.session_id, prompt[:48])
+                except Exception:
+                    pass
             # 注意：turn_context 会把当前 user 消息追加到 history 副本之后，
             # 所以这里传的 history 必须不含本轮消息（CLI 同款约定）。
             state.blocks.clear()
             state.statuses.clear()
             result = run_turn(agent, session_db, events, state, prompt,
-                              conversation_history, console, args.plain)
+                              sess.history, console, args.plain)
             final = result.get("final_response") or ""
-            conversation_history.append({"role": "user", "content": prompt})
-            conversation_history.append({"role": "assistant", "content": final})
+            sess.history.append({"role": "user", "content": prompt})
+            sess.history.append({"role": "assistant", "content": final})
             if args.plain:
                 if final:
                     console.print(final)
@@ -736,9 +634,16 @@ def main(argv=None) -> int:
 
         # 多轮交互：会话级输入层（回合中打字不丢失、不回显进重定向缓冲区）
         console.print(Text("quant-agent · 量化研究智能体", style="bold cyan"))
-        console.print(Text("prime 式 CoT 全展示 · Ctrl+T 折叠思考 · 空行退出",
-                           style="dim"))
-        inp = InputLayer(state)
+        console.print(Text("prime 式 CoT 全展示 · /help 看命令 · ! 直达 shell · "
+                           "Ctrl+T 折叠思考 · 空行退出", style="dim"))
+        from qra.console import commands
+        from qra.console.session_state import CommandContext, ConsoleHistory
+
+        inp = InputLayer(state, history=ConsoleHistory(),
+                         completer=commands.complete, prompt="❯ ")
+        ctx = CommandContext(agent=agent, db=session_db, sess=sess,
+                             console=console, inp=inp, events=events,
+                             plain=args.plain)
         inp.start()
         try:
             while True:
@@ -754,11 +659,18 @@ def main(argv=None) -> int:
                     continue
                 if not user_input.strip():
                     break
-                try:
-                    one_turn(user_input.strip())
-                except KeyboardInterrupt:
-                    console.print(Text("(中断本轮)", style="yellow"))
+                line = user_input.strip()
+                # /resume 待选号模式：纯数字行直接恢复对应会话
+                if commands.maybe_pending(ctx, line):
+                    console.print()
                     continue
+                # 分流：! 直达 → / 命令 → 普通 prompt
+                if commands.dispatch(ctx, line) == "prompt":
+                    try:
+                        one_turn(line)
+                    except KeyboardInterrupt:
+                        console.print(Text("(中断本轮)", style="yellow"))
+                        continue
                 console.print()
         finally:
             inp.close()
