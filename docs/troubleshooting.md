@@ -18,6 +18,7 @@
 | 终端里无法拖选复制输出、无法滚轮翻页 | 鼠标捕获（`?1000h`）常开吞掉原生选择与滚轮 | 默认关；`/mouse on` 显式开（iTerm2 按住 Option 可临时拖选） | D011 |
 | 输入 /help 回车不执行（只补全不跑） | 旧版斜杠菜单 Enter 只应用草稿不提交 | D011：菜单 Enter=选中即执行；Tab 只补全 | D011 |
 | 回合报错后 console 假死、错误现场拿不到 | 渲染线程无异常兜底 + 终端 raw 模式残留 | 渲染/主循环三层兜底 + `HERMES_HOME/logs/console_errors.log` 落盘（traceback 全文） | D011 |
+| 中文输入法打字时整个终端软件消失、所有窗口全没（qra 进程还活着） | **不是 qra**：macOS Terminal.app 2.15 已知 bug——IME 行内预编辑文本（拼音）换行时堆内存损坏，点击/重绘时随机引爆（本机 DiagnosticReports 三份 .ips 铁证：01:47/02:15/08:01，签名与 Apple 论坛同款报告一致） | 换 iTerm2（根治，不触发）；留在 Terminal 则拉宽窗口、空格先上屏短语提交；console 启动检测 `TERM_PROGRAM=Apple_Terminal` 自动打警告 | #77 |
 
 ## 测试与冒烟框架的坑（都是框架 bug，产品代码一直正确）
 

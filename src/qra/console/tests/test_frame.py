@@ -478,13 +478,51 @@ class FrameActivityTests(_Env):
         self.assertEqual(screen.line(24), "❯")
         self.assertIn("⏺ 工具", screen.line(1))          # 摘要行在内容区
 
-    def test_busy_inversion_emits_reverse_video(self):
-        """busy 中提示符带反显（\x1b[7m），草稿内容仍实时在框内。"""
+    def test_activity_spinner_frames_animate(self):
+        """D-03：活动条带 braille spinner，时间推进帧变化（tick 驱动重绘）。"""
+        import time
+        from qra.console.frame import _SPINNER_FRAMES
+        screen, tio, r, fr = _setup()
+        r.begin()
+        r.tool_start("t1", "qra_quote", {})
+        act = r.activity()
+        t0 = time.time()
+        a = fr._activity_text(act, t0)
+        b = fr._activity_text(act, t0 + 0.1)
+        self.assertIn(a[0], _SPINNER_FRAMES)
+        self.assertIn(b[0], _SPINNER_FRAMES)
+        self.assertNotEqual(a[0], b[0])                  # 0.1s = 下一帧
+        self.assertIn("qra_quote", a)
+        # tick() 感知帧变化 → 重绘活动行（动画不断）
+        fr.activity_provider = r.activity
+        fr.present()
+        fr._last_activity_text = None
+        self.assertTrue(fr.tick())
+
+    def test_tab_suffix_space_renders_aligned(self):
+        """D-06：补全后缀（尾空格）渲染对齐——光标落在空格之后。
+
+        尾空格在屏幕上不可见但必须占列（对齐不变量）。pty 探针实证
+        （80x24 视口）：Tab 补全 `/fold ` 后光标在 24;9（= 提示符 2 列
+        + 5 字符 + 尾空格）。screen.line() 会 rstrip，故以光标列为证。
+        """
+        screen, tio, r, fr = _setup()
+        fr.present()
+        fr.input_changed("/fold ", 6)
+        self.assertEqual(screen.line(24), "❯ /fold")     # rstrip 后内容一致
+        self.assertEqual(tio.cursor_pos, (24, 9))        # 光标过空格落第 9 列
+
+    def test_busy_emits_dim_not_reverse(self):
+        """busy 中提示符带 dim（\x1b[2m，D-02），草稿内容仍实时在框内。
+
+        反显 \x1b[7m 在部分终端有闪烁/主题冲突，审计 D-02 改 dim。
+        """
         screen, tio, r, fr = _setup()
         fr.present()
         fr.input_changed("hi", 2)
         fr.set_busy(True)
-        self.assertIn("\x1b[7m", screen.raw)             # 反显开启
+        self.assertIn("\x1b[2m", screen.raw)             # dim 开启
+        self.assertNotIn("\x1b[7m", screen.raw)          # 反显不再出现
         self.assertEqual(screen.line(24), "❯ hi")        # SGR 被剥后内容一致
         fr.set_busy(False)
         self.assertEqual(screen.line(24), "❯ hi")

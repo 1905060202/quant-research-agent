@@ -86,8 +86,10 @@ def _show_sessions(ctx, rows, hint: str = "") -> None:
                       f"msg={r.get('message_count') or 0}  "
                       f"{_relative_time(r.get('last_active') or r.get('started_at'))}")
     else:
+        from rich import box
         from rich.table import Table
-        t = Table(title="最近会话")
+        # D-05：HORIZONTALS 只画横线——宽列文本无竖线干扰，hermes 同款
+        t = Table(title="最近会话", box=box.HORIZONTALS)
         t.add_column("#", justify="right", style="dim")
         t.add_column("标题")
         t.add_column("会话 ID", style="dim")
@@ -550,8 +552,9 @@ def cmd_agents(ctx, args: str) -> None:
             _say(ctx, f" {tag} [{r['state']}] {r['role']} {r['cap']} "
                       f"model={r['model']} {r['dur']}  {r['id']}")
         return
+    from rich import box
     from rich.table import Table
-    t = Table(title="子代理（本进程注册表快照，* = 本会话）")
+    t = Table(title="子代理（本进程注册表快照，* = 本会话）", box=box.HORIZONTALS)
     t.add_column("", style="bold")
     t.add_column("状态")
     t.add_column("角色", style="bold")

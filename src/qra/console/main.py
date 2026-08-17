@@ -55,9 +55,12 @@ from rich.text import Text
 # qra.* 顶层导入需要 src/ 在 sys.path 上。vendor 顶层模块靠 editable 安装
 # 解析不受影响；qra 自身没有安装面，此处与 test_inputlayer.py 同约定自补。
 # 以 qra.console.main 形式导入时该路径已在 sys.path，guard 是 no-op。
+# qra.* 的顶层导入必须放在本块之后（否则 ModuleNotFoundError）。
 _src_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 if _src_root not in sys.path:
     sys.path.insert(0, _src_root)
+
+from qra.console import palette
 
 # InputLayer/_char_width/detect_paste 从 input_layer.py 迁出后 re-export：
 # test_inputlayer.py 依赖 qra.console.main 此路径（门禁兼容，不破不改）
@@ -83,6 +86,39 @@ class TurnState:
         self.text_open = False
         self.has_text = False             # 本轮是否已流式输出文本
         self.model = ""                   # footer 用
+
+
+def _startup_banner(tio, renderer: TurnRenderer) -> None:
+    """启动横幅（D-04）：金色边框 + 居中标题 + dim 副行，hermes 同款。
+
+    宽度钳制 [40, 96]；浅色终端经 palette 重映射为深金（D-07）。
+    显示宽度按字形簇度量（frame._slice_disp），CJK 不撑破边框。
+    """
+    from qra.console.frame import _slice_disp, cell_len
+
+    w = min(max(tio.width or 80, 40), 96)
+    inner = w - 4
+    gold = palette.gold()
+    dim_gold = palette.dim_gold()
+    title = "quant-agent · 量化研究智能体"
+    sub = ("prime 式 CoT 全展示 · /help 看命令 · ! 直达 shell · "
+           "Ctrl+T 折叠思考 · /mouse on 开点击展开 · Tab 看面板 · "
+           "←/Esc 返回 · 空行退出")
+
+    def line(mid: str, mid_style: str, center: bool = False) -> Text:
+        mid = _slice_disp(mid, 0, inner)
+        pad = inner - cell_len(mid)
+        lp = pad // 2 if center else 0
+        t = Text()
+        t.append("║ ", style=gold)
+        t.append(" " * lp + mid + " " * (pad - lp), style=mid_style)
+        t.append(" ║", style=gold)
+        return t
+
+    renderer.append_line(Text("╔" + "═" * (w - 2) + "╗", style=gold))
+    renderer.append_line(line(title, f"bold {gold}", center=True))
+    renderer.append_line(line(sub, dim_gold))
+    renderer.append_line(Text("╚" + "═" * (w - 2) + "╝", style=gold))
 
 
 def _log_turn_error(exc: Exception) -> None:
@@ -638,10 +674,17 @@ def main(argv=None) -> int:
         frame.offset_provider = renderer.offset
         frame.restore_cb = renderer.reprint_abs
         frame.rows_provider = lambda: renderer._row
-        renderer.append_line("quant-agent · 量化研究智能体", style="bold cyan")
-        renderer.append_line("prime 式 CoT 全展示 · /help 看命令 · ! 直达 shell · "
-                             "Ctrl+T 折叠思考 · /mouse on 开点击展开 · "
-                             "Tab 看面板 · ←/Esc 返回 · 空行退出", style="dim")
+        # D-07：横幅配色前先探终端背景（OSC 11，raw 窗口期查询）
+        palette.probe_terminal_background(sys.stdin.fileno(), sys.stdout.fileno())
+        if os.environ.get("TERM_PROGRAM") == "Apple_Terminal":
+            # Terminal.app 2.15 已知 bug（#77，三份 .ips 铁证）：IME 行内
+            # 预编辑文本换行 → 堆损坏 → 整个终端软件崩溃。崩的不是 qra，
+            # 但值得启动即预警。
+            renderer.append_line(
+                "⚠ Apple Terminal 已知 bug：中文输入法长拼音换行可能崩掉整个"
+                "终端（qra 进程无恙）。建议换 iTerm2；或空格先上屏、拉宽窗口。",
+                style="yellow")
+        _startup_banner(tio, renderer)
         from qra.console import commands
         from qra.console.session_state import CommandContext, ConsoleHistory
 
@@ -709,7 +752,12 @@ def main(argv=None) -> int:
                     break
                 line = user_input.strip()
                 # 输入行回显进内容区（帧原位清草稿后补 transcript，CC 对齐）
-                renderer.append_line(Text(f"❯ {line}", style="bold cyan"))
+                # D-04：金● 前缀（hermes 同款），正文 bold——提示符 ❯ 与
+                # 回显 ● 语义分离：❯=等待输入，●=已提交。
+                echo = Text()
+                echo.append("● ", style=palette.accent())
+                echo.append(line, style="bold")
+                renderer.append_line(echo)
                 # /resume 待选号模式：纯数字行直接恢复对应会话
                 if commands.maybe_pending(ctx, line):
                     renderer.append_line()

@@ -3,7 +3,7 @@
 输出滚动时输入框始终钉在终端底部一层——DECSTBM 滚动区域（内容在
 [1..R] 内滚动，帧钉在 [R+1..H] 永不滚动），帧内自上而下分四带：
 
-  提示符带（1..k 行，busy 反显 = CC 式「输入框」）→ 菜单带（0..m 行，
+  提示符带（1..k 行，busy dim = CC 式「输入框」）→ 菜单带（0..m 行，
   / 候选面板）→ 活动条带（0/1 行：shell/工具/思考运行中标注+计时）
   → 面板带（0..PANEL_MAX 行：Tab 切入看 shell 输出/本轮工具详情）
 
@@ -30,6 +30,9 @@ from typing import Any, Callable
 from rich.cells import cell_len
 
 PANEL_MAX = 10  # 面板带最大行数（含标题行）
+
+# D-03：活动条 spinner 帧序列（vendor cli.py 同款 braille 十帧）
+_SPINNER_FRAMES = ("⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏")
 
 
 def _iter_clusters(s: str) -> list[str]:
@@ -300,7 +303,8 @@ class Frame:
             self.tio.move(row + i, 1)
             self.tio.erase_line()
             if self.busy:
-                self.tio.write_bytes(b"\x1b[7m")
+                # D-02：busy 用 dim（\x1b[2m）不用反显（\x1b[7m）
+                self.tio.write_bytes(b"\x1b[2m")
                 self.tio.write(_pad_disp(seg, w))
                 self.tio.write_bytes(b"\x1b[0m")
             else:
@@ -331,13 +335,16 @@ class Frame:
     def _activity_text(self, act: tuple, now: float) -> str:
         kind, name, started = act
         el = max(0, now - started)
+        # D-03：braille spinner（vendor cli.py 同款帧序列），嵌进文本后
+        # tick() 的文本变化检测自动驱动动画（无状态、线程安全）。
+        spin = _SPINNER_FRAMES[int(now * 10) % 10]
         if kind == "shell":
-            return f"⏵ shell: {name} 运行中…（{el:.0f}s）· Tab 查看"
+            return f"{spin} shell: {name} 运行中…（{el:.0f}s）· Tab 查看"
         if kind == "tool":
-            return f"⏺ 工具 {name} 执行中…（{el:.0f}s）· Tab 查看"
+            return f"{spin} 工具 {name} 执行中…（{el:.0f}s）· Tab 查看"
         if kind == "subagent":
-            return f"⎇ 子代理 {name} 执行中…（{el:.0f}s）· Tab 查看"
-        return f"✻ 思考中…（{el:.0f}s）· Tab 查看"
+            return f"{spin} 子代理 {name} 执行中…（{el:.0f}s）· Tab 查看"
+        return f"{spin} 思考中…（{el:.0f}s）· Tab 查看"
 
     def _draw_activity_at(self, row: int, w: int) -> None:
         act = self._activity_now()
@@ -415,7 +422,9 @@ class Frame:
                 self.tio.move(top + i, 1)
                 self.tio.erase_line()
                 if self.busy:
-                    self.tio.write_bytes(b"\x1b[7m")
+                    # D-02：反显（\x1b[7m）在部分终端上有闪烁/主题冲突，
+                    # 改 dim（\x1b[2m）——提示符带"正在忙"用变暗表达即可。
+                    self.tio.write_bytes(b"\x1b[2m")
                     self.tio.write(_pad_disp(seg, w))
                     self.tio.write_bytes(b"\x1b[0m")
                 else:

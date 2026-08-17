@@ -18,7 +18,8 @@ import unittest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 
-from qra.console.renderer import Block, TurnRenderer, _thinking_recap  # noqa: E402
+from qra.console.renderer import (Block, TurnRenderer, _compact_args,  # noqa: E402
+                                  _thinking_recap)
 from qra.console.termio import TermIO  # noqa: E402
 
 
@@ -191,3 +192,30 @@ class GateMarkerTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CompactArgsTests(unittest.TestCase):
+    """D-01：结构化参数摘要。"""
+
+    def test_empty(self):
+        self.assertEqual(_compact_args({}), "")
+        self.assertEqual(_compact_args(None), "")
+
+    def test_flat_dict_kv(self):
+        self.assertEqual(
+            _compact_args({"symbol": "600519", "days": 30, "force": True}),
+            "symbol=600519 days=30 force=true")
+
+    def test_short_list_inline(self):
+        self.assertEqual(
+            _compact_args({"symbols": ["600519", "000858"], "fields": "price"}),
+            "symbols=[600519, 000858] fields=price")
+
+    def test_nested_falls_back_to_json(self):
+        out = _compact_args({"a": {"b": [1, 2, 3]}})
+        self.assertEqual(out, '{"a": {"b": [1, 2, 3]}}')
+
+    def test_truncate_140(self):
+        out = _compact_args({"k" * 100: "v" * 100})
+        self.assertLessEqual(len(out), 141)
+        self.assertTrue(out.endswith("…"))

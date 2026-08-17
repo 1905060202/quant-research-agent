@@ -82,15 +82,44 @@ class Block:
 
 
 def _compact_args(args: Any) -> str:
+    """结构化参数摘要（D-01）：浅层 k=v / 逗号列表；否则紧凑 JSON。
+
+    上限 140 字符——工具行 args 只做提示不承载全文（展开看原文）。
+    整坨 JSON 字段名喧宾夺主且高频超长截断，浅层结构化更可读。
+    """
     if not args:
         return ""
     import json
+
+    def _v(v: Any) -> str | None:
+        if isinstance(v, bool):
+            return "true" if v else "false"
+        if isinstance(v, int):
+            return str(v)
+        if isinstance(v, float):
+            return f"{v:g}"
+        if isinstance(v, str) and 0 < len(v) <= 32:
+            return v
+        if isinstance(v, (list, tuple)) and 0 < len(v) <= 4:
+            inner = [_v(x) for x in v]
+            if all(x is not None for x in inner):
+                return "[" + ", ".join(inner) + "]"
+        return None
+
     try:
-        s = json.dumps(args, ensure_ascii=False)
+        if isinstance(args, dict) and args and all(
+                isinstance(k, str) and _v(v) is not None
+                for k, v in args.items()):
+            s = " ".join(f"{k}={_v(v)}" for k, v in args.items())
+        elif isinstance(args, (list, tuple)) and args and all(
+                _v(v) is not None for v in args):
+            s = ", ".join(_v(v) for v in args)
+        else:
+            s = json.dumps(args, ensure_ascii=False)
     except Exception:
         s = str(args)
-    if len(s) > 300:
-        s = s[:300] + "…"
+    if len(s) > 140:
+        s = s[:140] + "…"
     return s
 
 
@@ -369,8 +398,25 @@ class TurnRenderer:
                 f" · {blk.duration:.1f}s · {mark}{tail} ▸")
 
     def _print_tool_line(self, blk: Block) -> None:
-        style = "green" if blk.ok else "red"
-        rows = self._line(Text(self._tool_summary(blk), style=style))
+        # D-01：分段着色——图标+名高亮、args/耗时/结果 dim、✓✗ 携成色。
+        # 旧版整行单色把 args 也染绿/红，长参数时视觉噪音大。
+        n = len(blk.result)
+        tail = ""
+        if n > 0:
+            tail = f" · 结果 {n} 字"
+            if n > _RESULT_STORE_MAX:
+                tail += "（已截断存储）"
+        mark = "✓" if blk.ok else "✗"
+        txt = Text()
+        txt.append(f"{self._tool_title(blk)} {blk.name}", style="bold cyan")
+        args_s = _compact_args(blk.args)
+        if args_s:
+            txt.append(f" {args_s}", style="dim")
+        txt.append(f" · {blk.duration:.1f}s", style="dim")
+        txt.append(f" {mark}", style="bold green" if blk.ok else "bold red")
+        txt.append(tail, style="dim")
+        txt.append(" ▸", style="dim")
+        rows = self._line(txt)
         blk.start_row = self._row - rows
         blk.end_row = self._row - 1
 

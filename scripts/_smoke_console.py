@@ -270,9 +270,10 @@ def run_smoke(root: str) -> bool:
         ok = False
 
     # ---- /sessions 提取会话 A 的 ID ----
-    # "最近会话" 在 /help 输出里就有（撞车），用重边框表头 ┃  # 唯一标记。
+    # "最近会话" 在 /help 输出里就有（撞车）；D-05 表格改 HORIZONTALS
+    # （无竖线）后改用表头行 "  #   标题" 作唯一标记。
     p.send(b"/sessions\n")
-    hit, _ = p.wait_count("┃  #", 1, 30)
+    hit, _ = p.wait_count("  #   标题", 1, 30)
     if not hit:
         print("  ✗ /sessions 无列表")
         ok = False
@@ -282,18 +283,19 @@ def run_smoke(root: str) -> bool:
     while time.time() < settle_end and not id_a:
         time.sleep(0.3)
         for line in p._plain().splitlines():
-            m = re.search(r"│\s*(\d+)\s*│\s*([^│]*?)\s*│\s*(\S+)\s*│\s*(\d+)\s*│", line)
-            if m and int(m.group(4)) >= 1:
-                id_a = m.group(3)
+            # HORIZONTALS 空格分列：ID 形如 20260817_xxx，其后是消息数
+            m = re.search(r"(\d{8}_\w+)\s+(\d+)\s+\S", line)
+            if m and int(m.group(2)) >= 1:
+                id_a = m.group(1)
                 break   # 首行即取：不 break 会被最后一行的 ID 覆盖
     if not id_a:
         print("  ✗ /sessions 中未提取到有消息的会话 ID（表格格式变化？）")
         ok = False
 
     # ---- /resume 无参 + 裸数字 ----
-    # 第 2 个 ┃  #（第 1 个是上一步 /sessions 的表）
+    # 第 2 个表头（第 1 个是上一步 /sessions 的表）
     p.send(b"/resume\n")
-    hit, _ = p.wait_count("┃  #", 2, 30)
+    hit, _ = p.wait_count("  #   标题", 2, 30)
     if not hit:
         print("  ✗ /resume 无参无列表")
         ok = False
