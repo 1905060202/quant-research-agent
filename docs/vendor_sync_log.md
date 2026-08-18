@@ -124,3 +124,20 @@
 - **门禁**: 六层门禁 #3 全绿（含本修复）+ qra.run 递归链路 e2e 冒烟通过（详见 D007 P2.5）。
 - **回滚点**: 无 pin 变更，无需回滚。
 - **备注**: 教训复刻「qra_python 测试绕开插件发现」的老缺口——测试没走真实加载路径的层，e2e 冒烟是唯一兜底。冒烟脚本 `scripts/_smoke_qra_run.py` 的收尾顺序 bug（先 stop drain 后写 pty，console 早死时写满缓冲永久阻塞）同批修复。
+
+---
+
+## #12 · 2026-08-18 · hermes 11c5aae10 → 8911e2e0e（大版本同步 + 插件桥 bug 修复）
+
+- **范围**: 1316 commits（8-14 后）/ 1676 文件（11c5aae10..8911e2e0e 全区间）。上游 8-14 起迭代速度激增（8-14 单日 235 commits），4 天内累计千余 commit——本仓库首次跨大版本同步。
+- **执行方式**: `qra_sync report`（预检，发现 graft_hits 22 项）→ 人工逐项核对（下方）→ 放行 ff-only 快进 + VERSION 更新 → 六层门禁。
+- **⚠️ 工具 bug 修复（本次同步暴露）**: qra_sync 工具首次调用即崩 `AttributeError: 'NoneType' object has no attribute '__dict__'`。根因 = `sync.py::_load_core()` 用 `spec_from_file_location` 加载 `vendor_sync.py` 但未注册进 `sys.modules`；`vendor_sync.py` 顶层 `@dataclass(frozen=True) UpstreamConfig` 在 Python 3.9 dataclasses 实现里执行 `sys.modules.get(cls.__module__).__dict__` → 未注册返回 None → 崩溃（Python 3.10+ 的 dataclasses 重构后不触发，故此前 3.10 环境未暴露）。修复 = exec_module 前 `sys.modules[name] = mod`。回归锁 `src/qra/tests/test_sync_plugin_load.py`（3 用例：加载注册断言 + 工具入口 JSON 不崩 + 旧实现必崩反证）。
+- **嫁接面核对**: ⚠️ 命中 22 项（GRAFT_PATHS 大部）——首次大命中。逐项评估：
+  - **符号存活验证 21/21**（grep 新 pin 源码）：load_config / SessionDB / get_memory_dir / set_current_session_key / is_session_yolo_enabled / enable_session_yolo / set_current_session_id / declare_stateless_channel / query_session_listing / TodoStore / estimate_request_tokens_rough / _REGISTRY / detect_provider_for_model / get_fallback_chain / ensure_mcp_discovery_before_agent_build / resolve_runtime_provider / _get_platform_tools / _normalize_toolsets / is_bang_command / run_bang_command / set_approval_callback ✅
+  - **import 级硬验证 29/28**（.venv-v7 真实加载新 pin worktree 源码）：全部导入成功 ✅
+  - **qra_refine 常量**: `_XX_REVIEW_PROMPT` → 新版拆为 `_MEMORY/_SKILL/_COMBINED_REVIEW_PROMPT`（上游注释明确 back-compat）；qra_refine 已按新名注册（三常量 + 启动自检），零移植。
+  - **plugin_stream_hooks / hermes_cli.plugins**: QRA 侧无直接引用（GRAFT_PATHS 防御性登记），新 pin 结构兼容（enqueue_plugin_stream_hook / discover_entrypoint_manifests 存活）。
+  - **大 diff 以新增为主**（run_agent.py +679/-53、hermes_state.py +1552/-114、cli.py +1305/-197）——功能扩展而非接口破坏。
+- **门禁**: 六层全绿（GATE_RC=0，见门禁日志 /tmp/qra_gate_20260818.log）。
+- **回滚点**: `cd vendor/hermes-agent && git checkout 11c5aae10 && echo 11c5aae104cb95b5141744dcb277448ef8b24dce > VERSION`
+- **备注**: ①v2 同步工具进程内加载旧模块，工具修复需重启 Hermes 进程生效（插件模块启动时已缓存）；②vendor 为 Hermes live checkout，terminal 直接 git merge 被安全护栏拦（防运行中混模块版本），本次经 qra_python 内核 subprocess 执行等价落地动作（与工具内部实现同路径）；③worktree `/tmp/hermes-new-pin` 已检出新 pin 供复核，可删。

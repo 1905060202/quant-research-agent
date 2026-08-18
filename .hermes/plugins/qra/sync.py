@@ -13,10 +13,20 @@ from pathlib import Path
 
 
 def _load_core():
-    """按文件路径加载 src/qra/vendor_sync.py，命名独立防冲突。"""
+    """按文件路径加载 src/qra/vendor_sync.py，命名独立防冲突。
+
+    必须在 exec_module 前把模块注册进 sys.modules：vendor_sync.py 顶层
+    的 @dataclass（UpstreamConfig）在 Python 3.9 的 dataclasses 实现里会
+    执行 sys.modules.get(cls.__module__).__dict__——模块未注册返回 None
+    直接 AttributeError（'NoneType' object has no attribute '__dict__'）。
+    """
+    import sys
+
     src = Path(__file__).resolve().parents[3] / "src" / "qra" / "vendor_sync.py"
-    spec = importlib.util.spec_from_file_location("_qra_vendor_sync_core", src)
+    name = "_qra_vendor_sync_core"
+    spec = importlib.util.spec_from_file_location(name, src)
     mod = importlib.util.module_from_spec(spec)
+    sys.modules[name] = mod  # dataclass 装饰器需要模块在 sys.modules 中
     spec.loader.exec_module(mod)
     return mod
 
